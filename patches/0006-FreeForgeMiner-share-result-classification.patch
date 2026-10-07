@@ -1,12 +1,34 @@
 From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
-Subject: [PATCH 6/6] FreeForgeMiner: share result classification (stale is not a reject, pool-side codes, reject codes in the log)
+Subject: [PATCH 6/6] FreeForgeMiner: share result handling (stale is not a reject, pool-side codes, worker_busy resend, reject codes in the log)
 
 ---
 diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
-index 3be0477..ecbd38a 100644
+index 3be0477..68cc7d6 100644
 --- a/crates/cmfd-miner/src/main.rs
 +++ b/crates/cmfd-miner/src/main.rs
-@@ -1531,11 +1531,22 @@ fn mine_production_v4_pool_session(
+@@ -1516,11 +1516,19 @@ fn mine_production_v4_pool_session(
+         else {
+             return Ok(());
+         };
++        let mut retries = 0_u32;
+         while matches!(
+             submitted.code.as_str(),
+-            "verifier_busy" | "share_rate_limited"
+-        ) && !stop.load(Ordering::Acquire)
++            // worker_busy: cmfd-pool.online verifies one share per worker name at a time;
++            // with one worker per rig two GPUs can collide, so the share is simply resent.
++            "verifier_busy" | "share_rate_limited" | "worker_busy"
++        ) && retries < 40
++            && !stop.load(Ordering::Acquire)
+         {
++            retries += 1;
++            if retries == 1 {
++                println!("SHARE RETRY | code={} (pool busy, resending)", submitted.code);
++            }
+             if !pool_interruptible_sleep(stop, Duration::from_millis(250)) {
+                 return Ok(());
+             }
+@@ -1531,11 +1539,22 @@ fn mine_production_v4_pool_session(
          }
          if submitted.accepted {
              statistics.accepted = statistics.accepted.saturating_add(1);
@@ -16,7 +38,7 @@ index 3be0477..ecbd38a 100644
 +            println!("SHARE STALE | code={} (block changed before the share arrived; harmless)", submitted.code);
 +        } else if matches!(
 +            submitted.code.as_str(),
-+            "backend_unavailable" | "verifier_busy" | "share_rate_limited" | "node_unavailable"
++            "backend_unavailable" | "verifier_busy" | "share_rate_limited" | "worker_busy" | "node_unavailable"
 +        ) {
 +            statistics.rejected = statistics.rejected.saturating_add(1);
 +            println!("SHARE NOT CREDITED | code={} (pool-side condition, not a GPU problem)", submitted.code);

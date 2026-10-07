@@ -119,6 +119,7 @@ The Tensor Core path loads the GPU much harder than older miners. A profile that
 | `INTEGRITY | ERROR ...` | **the GPU computes wrong results** — lower the offset/clocks for that card |
 | `SHARE STALE` | the block changed before the share arrived — harmless, not counted as rejected |
 | `SHARE NOT CREDITED` | pool-side condition (e.g. `backend_unavailable`) — not a GPU problem |
+| `SHARE RETRY \| code=worker_busy` | the pool was busy with another share of the same worker (one worker per rig); the share is resent automatically |
 | `SHARE REJECTED | code=...` | the pool rejected the share; repeated rejects = unstable GPU |
 | `DEV FEE | mining 36 s ...` / `DEV FEE | done` | the 1 % developer fee slice |
 
@@ -265,6 +266,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 | `INTEGRITY | ERROR ...` | **карта считает с ошибками** — снизьте смещение/частоты этой карте |
 | `SHARE STALE` | блок сменился, пока шара летела, — безобидно, в «rejected» не считается |
 | `SHARE NOT CREDITED` | проблема на стороне пула (например, `backend_unavailable`) — карта ни при чём |
+| `SHARE RETRY \| code=worker_busy` | пул был занят другой шарой этого же воркера (один воркер на риг); шара автоматически отправлена повторно |
 | `SHARE REJECTED | code=...` | пул отклонил шару; повторяется — карта нестабильна |
 | `DEV FEE | mining 36 s ...` / `DEV FEE | done` | окно комиссии разработчика 1 % |
 
