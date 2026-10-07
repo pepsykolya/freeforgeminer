@@ -19,7 +19,7 @@ FreeForgeMiner switches them to the Ampere path and computes the final BLAKE3 di
 | GPU series | What FreeForgeMiner adds | Status |
 |---|---|---|
 | RTX 30xx (Ampere, sm_86) | Ampere Tensor Core path + GPU digest | **main target, tested** |
-| RTX 40xx (Ada, sm_89) | GPU digest only (upstream already used the fast path) | tested on RTX 4070 Ti: 23.7 FW/s — **CMFD GPU miner r13 is currently faster on this card (25.9 FW/s)** |
+| RTX 40xx (Ada, sm_89) | GPU digest only (upstream already used the fast path) | tested on RTX 4070 Ti: 25.7 FW/s (v1.1.0; was 23.7) — **CMFD GPU miner r13 is still slightly faster on this card (25.9 FW/s)** |
 | RTX 20xx (Turing), RTX 50xx (Blackwell), Volta, Hopper | GPU digest | built, not yet tested by us |
 
 ### 2. Measured performance
@@ -155,6 +155,11 @@ Run one process per GPU (`--gpu N`). The first run needs the model and the launc
 
 ---
 
+### Changelog
+
+* **1.1.0** - persistent search buffers and no dead stores of per-layer activations/preactivations. RTX 4070 Ti: 23.7 -> 25.7 FW/s (+9 %, ~185 W); RTX 3070: 14.56 -> 14.69 FW/s (+1 %). Bit-exact (determinism and digest verified), 0 rejected / 0 invalid on the pool.
+* **1.0.6** - correct hashrate with batch 64 (12 GB+ cards).
+
 ## Русский
 
 ### 1. Что это
@@ -169,7 +174,7 @@ FreeForgeMiner — майнер с открытым кодом для **Common F
 | Серия | Что даёт FreeForgeMiner | Статус |
 |---|---|---|
 | RTX 30xx (Ampere) | путь Ampere на тензорных ядрах + хеш на GPU | **основная цель, проверено** |
-| RTX 40xx (Ada) | только хеш на GPU (быстрый путь у официального кода уже был) | проверено на RTX 4070 Ti: 23,7 FW/s — **CMFD GPU miner r13 на этой карте сейчас быстрее (25,9 FW/s)** |
+| RTX 40xx (Ada) | только хеш на GPU (быстрый путь у официального кода уже был) | проверено на RTX 4070 Ti: 25,7 FW/s (v1.1.0; было 23,7) — **CMFD GPU miner r13 на этой карте пока чуть быстрее (25,9 FW/s)** |
 | RTX 20xx, RTX 50xx, Volta, Hopper | хеш на GPU | собрано, нами пока не проверялось |
 
 ### 2. Измеренная производительность
@@ -300,3 +305,8 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
   --production-v4-scratch /tmp/ffm-gpu0 --stats-seconds 5
 ```
 По процессу на каждую карту (`--gpu N`). Для первого запуска нужны модель и файлы запуска сети (`production-mainnet/`) из архива.
+
+### Список изменений
+
+* **1.1.0** - постоянные буферы поиска, убраны лишние записи активаций и преактиваций по слоям. RTX 4070 Ti: 23,7 -> 25,7 FW/s (+9 %, ~185 Вт); RTX 3070: 14,56 -> 14,69 FW/s (+1 %). Результат побитово тот же (детерминизм и дайджест проверены), на пуле 0 отклонённых / 0 ошибочных.
+* **1.0.6** - корректный хешрейт при batch 64 (карты от 12 ГБ).

@@ -39,7 +39,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Field | Value |
 |---|---|
 | Miner name | `freeforgeminer` |
-| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.0.6/freeforgeminer-1.0.6.tar.gz` |
+| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.1.0/freeforgeminer-1.1.0.tar.gz` |
 | Hash algorithm | `forgematrix_v4` |
 | Wallet and worker template | `YOUR_64_HEX_CMFD_ADDRESS.%WORKER_NAME%` |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |
@@ -74,3 +74,8 @@ FreeForgeMiner — открытый форк официального майне
 быстрее на GPU: на RTX 3070 ~+40 % (тензорные ядра Ampere) и ещё ~+15 % на райзерах x1 (хеш считается на видеокарте).
 Комиссия 1 %: 36 секунд в час на кошелёк разработчика на том же пуле, видна в логе (`DEV FEE`), код — в `patches/`.
 HiveOS: Custom miner, ссылка на релиз выше, мощность видна по каждой карте.
+
+## Changelog
+
+* **1.1.0** - persistent search buffers and no dead stores of per-layer activations/preactivations (patch `0008`). RTX 4070 Ti: 23.7 -> 25.7 FW/s (+9 %, ~185 W); RTX 3070: 14.56 -> 14.69 FW/s (+1 %). Bit-exact (determinism and digest verified), 0 rejected / 0 invalid on the pool.
+* **1.0.6** - correct hashrate with batch 64 (12 GB+ cards).
