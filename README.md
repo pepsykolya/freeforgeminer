@@ -37,7 +37,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Field | Value |
 |---|---|
 | Miner name | `freeforgeminer` |
-| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.0.0/freeforgeminer-1.0.0.tar.gz` |
+| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.0.1/freeforgeminer-1.0.1.tar.gz` |
 | Hash algorithm | `forgematrix_v4` |
 | Wallet and worker template | `YOUR_64_HEX_CMFD_ADDRESS.%WORKER_NAME%` |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |
@@ -57,7 +57,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 ```bash
 ./build.sh          # clones upstream at the pinned commit, applies patches/, builds miner + GPU worker
 ```
-Needs: Rust (stable), CUDA Toolkit 12.9, git, python3.
+Needs: Rust (stable), CUDA Toolkit 12.9, git, python3. Build inside an Ubuntu 22.04 container (glibc 2.35) so the binaries run on HiveOS.
 
 ## License
 
