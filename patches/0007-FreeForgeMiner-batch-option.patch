@@ -1,15 +1,9 @@
-From 0c39c2c85b051236ad3c0d5d2b5acd21b43b6b0c Mon Sep 17 00:00:00 2001
 From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
-Date: Wed, 7 Oct 2026 09:23:59 +0300
-Subject: [PATCH] FreeForgeMiner: --batch N (1-64), automatic by GPU memory
- when omitted
+Subject: [PATCH 7/7] FreeForgeMiner: --batch N (1-64), automatic by GPU memory; hashrate accounting uses the real batch
 
 ---
- crates/cmfd-miner/src/main.rs | 31 ++++++++++++++++++++++++++++++-
- 1 file changed, 30 insertions(+), 1 deletion(-)
-
 diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
-index 68cc7d6..8ada626 100644
+index 68cc7d6..7c4104d 100644
 --- a/crates/cmfd-miner/src/main.rs
 +++ b/crates/cmfd-miner/src/main.rs
 @@ -250,6 +250,10 @@ enum Command {
@@ -59,7 +53,21 @@ index 68cc7d6..8ada626 100644
  }
  
  #[cfg(feature = "production-v4")]
-@@ -1260,11 +1279,21 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+@@ -1222,8 +1241,12 @@ fn pool_search_work_completed(result: &PoolWorkSearchResult, scheduled_work: u64
+ }
+ 
+ #[cfg(feature = "production-v4")]
++// Batch size actually used by this process (set once at start; --batch / auto).
++static FFM_BATCH: std::sync::atomic::AtomicU32 =
++    std::sync::atomic::AtomicU32::new(PRODUCTION_V4_POOL_SEARCH_BATCH_SIZE);
++
+ fn scheduled_pool_search_work(start_nonce: u64) -> u64 {
+-    let requested = u64::from(PRODUCTION_V4_POOL_SEARCH_BATCH_SIZE);
++    let requested = u64::from(FFM_BATCH.load(std::sync::atomic::Ordering::Relaxed));
+     let remaining_after_first = u64::MAX - start_nonce;
+     if remaining_after_first < requested - 1 {
+         remaining_after_first + 1
+@@ -1260,11 +1283,21 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
          worker.clone(),
          payout,
      )?;
@@ -72,7 +80,7 @@ index 68cc7d6..8ada626 100644
 +        "Batch: {batch_size} forwards per GPU pass{}",
 +        if options.batch.is_some() { "" } else { " (auto)" }
 +    );
-+    let _ = PRODUCTION_V4_POOL_SEARCH_BATCH_SIZE;
++    FFM_BATCH.store(batch_size, std::sync::atomic::Ordering::Relaxed);
      let searcher = ProductionV4PersistentPoolSearcher::start(production_v4_pool_searcher_config(
          &options.replay_worker,
          &options.model_bank,
@@ -82,6 +90,3 @@ index 68cc7d6..8ada626 100644
          options.wsl_distribution.as_deref(),
          Some(&gpu.uuid),
      )?)?;
--- 
-2.43.0
-
