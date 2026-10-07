@@ -157,6 +157,7 @@ Run one process per GPU (`--gpu N`). The first run needs the model and the launc
 
 ### Changelog
 
+* **1.1.1** - log banner shows the real release version.
 * **1.1.0** - persistent search buffers and no dead stores of per-layer activations/preactivations. RTX 4070 Ti: 23.7 -> 25.7 FW/s (+9 %, ~185 W); RTX 3070: 14.56 -> 14.69 FW/s (+1 %). Bit-exact (determinism and digest verified), 0 rejected / 0 invalid on the pool.
 * **1.0.6** - correct hashrate with batch 64 (12 GB+ cards).
 
@@ -308,5 +309,6 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 
 ### Список изменений
 
+* **1.1.1** - баннер в логе показывает реальную версию релиза.
 * **1.1.0** - постоянные буферы поиска, убраны лишние записи активаций и преактиваций по слоям. RTX 4070 Ti: 23,7 -> 25,7 FW/s (+9 %, ~185 Вт); RTX 3070: 14,56 -> 14,69 FW/s (+1 %). Результат побитово тот же (детерминизм и дайджест проверены), на пуле 0 отклонённых / 0 ошибочных.
 * **1.0.6** - корректный хешрейт при batch 64 (карты от 12 ГБ).

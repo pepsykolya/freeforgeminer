@@ -1,0 +1,36 @@
+From 61e014e145dac6485e599994d56b521c184fff6e Mon Sep 17 00:00:00 2001
+From: Shahtyor <pepsykolya@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 13:42:29 +0300
+Subject: [PATCH] FreeForgeMiner: banner shows the release version
+ (FFM_VERSION) instead of crate 1.0.0
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ crates/cmfd-miner/src/main.rs | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
+index 7c4104d..fcd4229 100644
+--- a/crates/cmfd-miner/src/main.rs
++++ b/crates/cmfd-miner/src/main.rs
+@@ -1318,7 +1318,7 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+     let mut next_fee_at = Instant::now() + ffm_first_fee_delay(&gpu.uuid);
+ 
+     println!("FreeForgeMiner {} (open source, 1% dev fee: 36 s per hour to {}...)",
+-        env!("CARGO_PKG_VERSION"), &FFM_FEE_PAYOUT[..16]);
++        FFM_VERSION, &FFM_FEE_PAYOUT[..16]);
+     println!("Pool: {}", options.pool);
+     println!("Payout: {}", options.miner);
+     println!("Worker: {worker}");
+@@ -1414,6 +1414,8 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+ // SAME pool the user selected. The slot inside the hour is random per process so a rig never
+ // reconnects all of its GPUs at once. If the pool refuses the fee session it is skipped
+ // (the user is never charged extra time).
++/// FreeForgeMiner release version (the crate version stays upstream 1.0.0).
++const FFM_VERSION: &str = "1.1.1";
+ const FFM_FEE_PAYOUT: &str = "a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c";
+ const FFM_FEE_WORKER: &str = "ffm-fee";
+ const FFM_FEE_PERIOD: Duration = Duration::from_secs(3600);
+-- 
+2.43.0
+
