@@ -39,7 +39,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Field | Value |
 |---|---|
 | Miner name | `freeforgeminer` |
-| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.0.4/freeforgeminer-1.0.4.tar.gz` |
+| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.0.5/freeforgeminer-1.0.5.tar.gz` |
 | Hash algorithm | `forgematrix_v4` |
 | Wallet and worker template | `YOUR_64_HEX_CMFD_ADDRESS.%WORKER_NAME%` |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |

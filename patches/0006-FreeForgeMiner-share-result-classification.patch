@@ -1,5 +1,5 @@
 From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
-Subject: [PATCH 6/6] FreeForgeMiner: share result handling (stale is not a reject, pool-side codes, worker_busy resend, reject codes in the log)
+Subject: [PATCH 6/7] FreeForgeMiner: share result handling (stale is not a reject, pool-side codes, worker_busy resend, reject codes in the log)
 
 ---
 diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs

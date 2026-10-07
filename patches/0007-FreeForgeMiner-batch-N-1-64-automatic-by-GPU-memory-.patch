@@ -1,0 +1,87 @@
+From 0c39c2c85b051236ad3c0d5d2b5acd21b43b6b0c Mon Sep 17 00:00:00 2001
+From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 09:23:59 +0300
+Subject: [PATCH] FreeForgeMiner: --batch N (1-64), automatic by GPU memory
+ when omitted
+
+---
+ crates/cmfd-miner/src/main.rs | 31 ++++++++++++++++++++++++++++++-
+ 1 file changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
+index 68cc7d6..8ada626 100644
+--- a/crates/cmfd-miner/src/main.rs
++++ b/crates/cmfd-miner/src/main.rs
+@@ -250,6 +250,10 @@ enum Command {
+         /// Seconds between mining-stat reports.
+         #[arg(long, default_value_t = DEFAULT_STATS_SECONDS)]
+         stats_seconds: u64,
++        /// Forwards per GPU batch (1-64). Omit for automatic choice by GPU memory
++        /// (64 on 11 GB+ cards, 32 otherwise).
++        #[arg(long)]
++        batch: Option<u32>,
+     },
+     /// Freeze one exact ProductionV3 node template and its qualification seed.
+     #[cfg(feature = "production-v3-testnet")]
+@@ -662,6 +666,7 @@ fn main() -> Result<()> {
+             production_v4_scratch,
+             production_v4_wsl_distribution,
+             stats_seconds,
++            batch,
+         } => run_production_v4_pool_miner(ProductionV4PoolMinerOptions {
+             pool,
+             miner,
+@@ -672,6 +677,7 @@ fn main() -> Result<()> {
+             scratch_directory: production_v4_scratch,
+             wsl_distribution: production_v4_wsl_distribution,
+             stats_seconds,
++            batch,
+         }),
+         #[cfg(feature = "production-v3-testnet")]
+         Command::SnapshotQualifiedTemplate {
+@@ -936,6 +942,19 @@ struct ProductionV4PoolMinerOptions {
+     scratch_directory: PathBuf,
+     wsl_distribution: Option<String>,
+     stats_seconds: u64,
++    batch: Option<u32>,
++}
++
++/// Automatic batch size: 64 forwards on 11 GB+ cards (measured ~+1 % on RTX 4070 Ti), 32 otherwise.
++fn ffm_auto_batch(gpu_uuid: &str) -> u32 {
++    let total_mib = std::process::Command::new("nvidia-smi")
++        .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits", "-i", gpu_uuid])
++        .output()
++        .ok()
++        .and_then(|out| String::from_utf8(out.stdout).ok())
++        .and_then(|text| text.trim().parse::<u64>().ok())
++        .unwrap_or(0);
++    if total_mib >= 11_000 { 64 } else { 32 }
+ }
+ 
+ #[cfg(feature = "production-v4")]
+@@ -1260,11 +1279,21 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+         worker.clone(),
+         payout,
+     )?;
++    let batch_size = match options.batch {
++        Some(value) if (1..=64).contains(&value) => value,
++        Some(value) => bail!("--batch must be 1-64 (got {value})"),
++        None => ffm_auto_batch(&gpu.uuid),
++    };
++    println!(
++        "Batch: {batch_size} forwards per GPU pass{}",
++        if options.batch.is_some() { "" } else { " (auto)" }
++    );
++    let _ = PRODUCTION_V4_POOL_SEARCH_BATCH_SIZE;
+     let searcher = ProductionV4PersistentPoolSearcher::start(production_v4_pool_searcher_config(
+         &options.replay_worker,
+         &options.model_bank,
+         &options.scratch_directory,
+-        PRODUCTION_V4_POOL_SEARCH_BATCH_SIZE,
++        batch_size,
+         options.wsl_distribution.as_deref(),
+         Some(&gpu.uuid),
+     )?)?;
+-- 
+2.43.0
+

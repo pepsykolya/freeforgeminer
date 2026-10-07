@@ -27,7 +27,7 @@ MAX_SAMPLE_AGE=45
 
 
 def validate_config(value,root):
-    required={'wallet','pool','worker','gpus','model_dir','state_dir','per_gpu_workers'}
+    required={'wallet','pool','worker','gpus','model_dir','state_dir','per_gpu_workers','batch'}
     if not isinstance(value,dict) or set(value)!=required: raise ValueError('invalid miner config')
     if not isinstance(value['wallet'],str) or not re.fullmatch(r'[0-9a-fA-F]{64}',value['wallet']):
         raise ValueError('wallet template must contain the 64-character destination public key')
@@ -43,6 +43,7 @@ def validate_config(value,root):
     if not isinstance(value['gpus'],list) or len(value['gpus'])>64 or any(type(gpu)!=int or not 0<=gpu<=255 for gpu in value['gpus']) or len(set(value['gpus']))!=len(value['gpus']):
         raise ValueError('gpus must be a JSON list of distinct NVIDIA GPU indices')
     if not isinstance(value['per_gpu_workers'],bool):raise ValueError('per_gpu_workers must be true or false')
+    if value['batch'] is not None and (type(value['batch'])!=int or not 1<=value['batch']<=64):raise ValueError('batch must be 1-64 or omitted (auto)')
     for key in ('model_dir','state_dir'):
         path=Path(value[key])
         if not path.is_absolute() or len(path.parts)<4 or root==path.resolve() or root in path.resolve().parents:
@@ -64,8 +65,8 @@ def configure(args):
     invalid.write_text('The latest flight-sheet configuration has not validated.\n')
     raw=os.environ.get('CMFD_HIVE_OPTIONS','').strip()
     options=json.loads(raw) if raw else {}
-    if not isinstance(options,dict) or set(options)-{'worker','gpus','model_dir','state_dir','per_gpu_workers'}:
-        raise ValueError('extra configuration must be a JSON object with worker, gpus, model_dir, state_dir or per_gpu_workers')
+    if not isinstance(options,dict) or set(options)-{'worker','gpus','model_dir','state_dir','per_gpu_workers','batch'}:
+        raise ValueError('extra configuration must be a JSON object with worker, gpus, model_dir, state_dir, per_gpu_workers or batch')
     template=os.environ.get('CMFD_HIVE_TEMPLATE','').strip()
     wallet,separator,template_worker=template.partition('.')
     default_worker=template_worker if separator else os.environ.get('CMFD_HIVE_WORKER','worker')
@@ -74,7 +75,8 @@ def configure(args):
            'worker':options.get('worker',default_worker),'gpus':options.get('gpus',[]),
            'model_dir':options.get('model_dir','/hive/miners/custom/cmfd-model'),
            'state_dir':options.get('state_dir',str(DEFAULT_DATA/'mainnet')),
-           'per_gpu_workers':options.get('per_gpu_workers',False)}
+           'per_gpu_workers':options.get('per_gpu_workers',False),
+           'batch':options.get('batch')}
     validate_config(value,args.root.resolve())
     atomic_json(args.config,value)
     invalid.unlink()
@@ -172,6 +174,7 @@ def run(args):
                 '--production-v4-bank',str(Path(config['model_dir'])/'MODEL-V2.bank'),
                 '--production-v4-replay-worker',str(root/'cmfd-v4-replay'),
                 '--production-v4-scratch',str(scratch),'--stats-seconds','5']
+            if config['batch'] is not None:command+=['--batch',str(config['batch'])]
             child=subprocess.Popen(command,cwd=root,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
                 text=True,encoding='utf-8',errors='replace',bufsize=1,start_new_session=True)
             children.append(child)

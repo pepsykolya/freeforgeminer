@@ -89,7 +89,7 @@ All rigs behind the same IP are affected. Rejected shares almost always mean an 
 ### 6. Extra config (optional JSON)
 
 ```json
-{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "model_dir":"/hive/miners/custom/cmfd-model"}
+{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "batch":64, "model_dir":"/hive/miners/custom/cmfd-model"}
 ```
 | Key | Meaning |
 |---|---|
@@ -97,6 +97,7 @@ All rigs behind the same IP are affected. Rejected shares almost always mean an 
 | `worker` | worker name on the pool (default: from the wallet template or the rig name) |
 | `per_gpu_workers` | `true` = each card is a separate worker `rig.gpuN` on the pool; default `false` = one worker per rig |
 | `model_dir` | where the 6.4 GB model lives (default `/hive/miners/custom/cmfd-model`, shared with other CMFD miners) |
+| `batch` | forwards per GPU pass, 1–64. Omit = automatic: 64 on 11 GB+ cards, 32 on 8 GB cards. Measured on RTX 4070 Ti: 4→23.2, 32→23.9, 64→24.1 FW/s (GPU time); on RTX 3070 the difference is within 1 % |
 
 ### 7. Overclocking (RTX 30)
 
@@ -146,7 +147,7 @@ Code: `patches/0003-*`.
 
 ```bash
 tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
-./cmfd-miner pool --pool 'cmfd+tls://IP:PORT?pin=...' --miner YOUR_ADDRESS --worker rig01 --gpu 0 \
+./cmfd-miner pool --pool 'cmfd+tls://IP:PORT?pin=...' --miner YOUR_ADDRESS --worker rig01 --gpu 0 [--batch 32] \
   --production-v4-bank /path/to/MODEL-V2.bank --production-v4-replay-worker "$PWD/cmfd-v4-replay" \
   --production-v4-scratch /tmp/ffm-gpu0 --stats-seconds 5
 ```
@@ -236,7 +237,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 ### 6. Extra config (необязательный JSON)
 
 ```json
-{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "model_dir":"/hive/miners/custom/cmfd-model"}
+{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "batch":64, "model_dir":"/hive/miners/custom/cmfd-model"}
 ```
 | Ключ | Что делает |
 |---|---|
@@ -244,6 +245,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 | `worker` | имя воркера на пуле (по умолчанию — из шаблона кошелька или имя рига) |
 | `per_gpu_workers` | `true` — каждая карта отдельным воркером `rig.gpuN` на пуле; по умолчанию `false` — один воркер на риг |
 | `model_dir` | где лежит модель 6,4 ГБ (по умолчанию `/hive/miners/custom/cmfd-model`, общая с другими CMFD-майнерами) |
+| `batch` | проходов на карту за раз, 1–64. Не указан — автоматически: 64 для карт от 11 ГБ, 32 для 8 ГБ. Замер на RTX 4070 Ti: 4→23,2, 32→23,9, 64→24,1 FW/s (время GPU); на RTX 3070 разница в пределах 1 % |
 
 ### 7. Разгон (RTX 30)
 
@@ -293,7 +295,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 
 ```bash
 tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
-./cmfd-miner pool --pool 'cmfd+tls://IP:PORT?pin=...' --miner ВАШ_АДРЕС --worker rig01 --gpu 0 \
+./cmfd-miner pool --pool 'cmfd+tls://IP:PORT?pin=...' --miner ВАШ_АДРЕС --worker rig01 --gpu 0 [--batch 32] \
   --production-v4-bank /путь/к/MODEL-V2.bank --production-v4-replay-worker "$PWD/cmfd-v4-replay" \
   --production-v4-scratch /tmp/ffm-gpu0 --stats-seconds 5
 ```
