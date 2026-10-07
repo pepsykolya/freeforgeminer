@@ -19,7 +19,7 @@ Every change against upstream is published in [`patches/`](patches) — includin
 | One process per GPU | HiveOS shows hashrate, temperature and shares of **every card** |
 | Integrity watchdog: every 128th batch is recomputed on the classic path and compared | An unstable GPU is reported in the log (`INTEGRITY \| ERROR`) instead of silently mining nothing |
 
-Measured on one RTX 3070 (PCIe x1), batch 32, full cycle, stock clocks: upstream 10.3 FW/s → FreeForgeMiner 16.4–16.9 FW/s.
+Measured on one RTX 3070 (PCIe x1), batch 32, full cycle, stock clocks: upstream 10.3 FW/s → FreeForgeMiner 16.4–16.9 FW/s (1.1.x); with the 1.2.0 fused kernel ~20 FW/s on RTX 3070 and ~30.5 FW/s on RTX 4070 Ti (pool).
 Results are bit-for-bit identical to upstream (verified by output hashes and by pool-accepted shares).
 
 ## Dev fee — 1 %
@@ -39,7 +39,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Field | Value |
 |---|---|
 | Miner name | `freeforgeminer` |
-| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.1.1/freeforgeminer-1.1.1.tar.gz` |
+| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.0/freeforgeminer-1.2.0.tar.gz` |
 | Hash algorithm | `forgematrix_v4` |
 | Wallet and worker template | `YOUR_64_HEX_CMFD_ADDRESS.%WORKER_NAME%` |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |
@@ -77,6 +77,7 @@ HiveOS: Custom miner, ссылка на релиз выше, мощность в
 
 ## Changelog
 
+* **1.2.0** - new fused GEMM+reduce GPU kernel (int8 tensor cores, layer reduce in registers): RTX 3070 14.9 -> 20.0 FW/s (+34 %), RTX 4070 Ti 26.1 -> 32.4 FW/s (+24 %) in the GPU benchmark; on the pool 4070 Ti 25.6 -> 30.5 FW/s. Bit-exact with the reference (determinism and digest checks), uses ~4x less GPU memory. Works on RTX 30/40/50 (sm_80+); older GPUs use the previous path. `CMFD_FUSED=-1` restores the old kernel.
 * **1.1.1** - log banner shows the real release version.
 * **1.1.0** - persistent search buffers and no dead stores of per-layer activations/preactivations (patch `0008`). RTX 4070 Ti: 23.7 -> 25.7 FW/s (+9 %, ~185 W); RTX 3070: 14.56 -> 14.69 FW/s (+1 %). Bit-exact (determinism and digest verified), 0 rejected / 0 invalid on the pool.
 * **1.0.6** - correct hashrate with batch 64 (12 GB+ cards).

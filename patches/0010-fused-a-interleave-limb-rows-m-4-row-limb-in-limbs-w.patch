@@ -1,0 +1,146 @@
+From 69e20282549604017aaeead35243d3f0390aaeeb Mon Sep 17 00:00:00 2001
+From: Shahtyor <pepsykolya@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 13:48:03 +0300
+Subject: [PATCH 10/12] fused-a: interleave limb rows (m = 4*row + limb) in
+ limbs write and reduce read
+
+Byte-identical output (sha b32 fea09cd2, b64 2028803a), determinism 0/32, digest 32/32.
+4070 Ti: 23.86 -> 26.08 FW/s (b32, +9.3%), 24.09 -> 26.17 FW/s (b64, +8.6%).
+---
+ JOURNAL-fused.md                              | 10 ++++
+ .../cuda/koala_four_limb_replay.cu            | 48 ++++++++++---------
+ 2 files changed, 36 insertions(+), 22 deletions(-)
+ create mode 100644 JOURNAL-fused.md
+
+diff --git a/JOURNAL-fused.md b/JOURNAL-fused.md
+new file mode 100644
+index 0000000..939e032
+--- /dev/null
++++ b/JOURNAL-fused.md
+@@ -0,0 +1,10 @@
++# JOURNAL — fused GEMM+reduce (ветка fused от df45de5)
++
++Цель: одно ядро int8 GEMM (tensor cores) + reduce слоя в эпилоге, int32-аккумуляторы не уходят в DRAM.
++База (4070 Ti, batch 32, opt1): GEMM 928.6 мс + reduce 299.6 мс = 1231 мс/пачка.
++
++## Шаг a — чередование лимбов (m = 4·row + limb)
++- Меняются ТОЛЬКО: write_centered_limbs (запись) и чтение аккумуляторов в reduce_layer/reduce_layer_batch.
++- GEMM layout-агностичен (строка m A ↔ строка m C), поэтому CUTLASS/dp4a не трогаем.
++- Новый layout: лимб j ячейки (r,c) лежит по смещению (4r+j)·width + c (внутри lane-блока 4·cells).
++- Проверка: opt_test.sh → determinism 0 расхождений, digest 32/32, побайтово как раньше.
+diff --git a/tools/production-v4-prover/cuda/koala_four_limb_replay.cu b/tools/production-v4-prover/cuda/koala_four_limb_replay.cu
+index eab9c47..ec1c560 100644
+--- a/tools/production-v4-prover/cuda/koala_four_limb_replay.cu
++++ b/tools/production-v4-prover/cuda/koala_four_limb_replay.cu
+@@ -146,14 +146,17 @@ __host__ __device__ uint32_t coordinate_mask(const uint32_t* coefficients,
+     return static_cast<uint32_t>(mask % KOALA_BEAR_MODULUS);
+ }
+ 
++// fused branch: limb j of cell (row, col) lives at offset (4*row + j)*width + col,
++// so that GEMM row m = 4*row + j holds limb j (limb-interleaved A layout).
+ __device__ void write_centered_limbs(uint32_t value, int8_t* limbs,
+-                                     size_t limb_stride, size_t index) {
+-    limbs[index] = static_cast<int8_t>(static_cast<int32_t>(value & 0xffU) - 128);
+-    limbs[limb_stride + index] =
++                                     size_t width, size_t row, size_t col) {
++    const size_t base = 4 * row * width + col;
++    limbs[base] = static_cast<int8_t>(static_cast<int32_t>(value & 0xffU) - 128);
++    limbs[width + base] =
+         static_cast<int8_t>(static_cast<int32_t>((value >> 8) & 0xffU) - 128);
+-    limbs[2 * limb_stride + index] =
++    limbs[2 * width + base] =
+         static_cast<int8_t>(static_cast<int32_t>((value >> 16) & 0xffU) - 128);
+-    limbs[3 * limb_stride + index] =
++    limbs[3 * width + base] =
+         static_cast<int8_t>(static_cast<int32_t>((value >> 24) & 0xffU) - 128);
+ }
+ 
+@@ -231,7 +234,7 @@ __global__ void initialize_activation(const int8_t* base_input, int8_t* limbs,
+     if (value >= KOALA_BEAR_MODULUS) value -= KOALA_BEAR_MODULUS;
+     value = cube_field(value);
+     activation_trace[index] = value;
+-    write_centered_limbs(value, limbs, count, index);
++    write_centered_limbs(value, limbs, width, row, column);
+ }
+ 
+ __global__ void reduce_layer(const int32_t* limb_accumulators, int8_t* limbs,
+@@ -243,17 +246,18 @@ __global__ void reduce_layer(const int32_t* limb_accumulators, int8_t* limbs,
+     const size_t index = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+     const size_t count = size_t(rows) * width;
+     if (index >= count) return;
++    const uint32_t row = static_cast<uint32_t>(index / width);
++    const uint32_t column = static_cast<uint32_t>(index % width);
++    const size_t acc_base = 4 * size_t(row) * width + column;
+     const int64_t dot =
+-        int64_t(limb_accumulators[index]) +
+-        256LL * int64_t(limb_accumulators[count + index]) +
+-        65'536LL * int64_t(limb_accumulators[2 * count + index]) +
+-        16'777'216LL * int64_t(limb_accumulators[3 * count + index]) +
++        int64_t(limb_accumulators[acc_base]) +
++        256LL * int64_t(limb_accumulators[width + acc_base]) +
++        65'536LL * int64_t(limb_accumulators[2 * width + acc_base]) +
++        16'777'216LL * int64_t(limb_accumulators[3 * width + acc_base]) +
+         CENTER_OFFSET *
+             (weight_row_sums == nullptr ? -int64_t(width / 2)
+                                         : int64_t(weight_row_sums[index % width]));
+     const uint32_t accumulator = canonicalize_signed(dot);
+-    const uint32_t row = static_cast<uint32_t>(index / width);
+-    const uint32_t column = static_cast<uint32_t>(index % width);
+     const uint32_t row_bits = __ffs(static_cast<int>(rows)) - 1;
+     const uint32_t column_bits = __ffs(static_cast<int>(width)) - 1;
+     const uint32_t mask =
+@@ -263,7 +267,7 @@ __global__ void reduce_layer(const int32_t* limb_accumulators, int8_t* limbs,
+     preactivation_trace[index] = value;
+     value = cube_field(value);
+     activation_trace[index] = value;
+-    write_centered_limbs(value, limbs, count, index);
++    write_centered_limbs(value, limbs, width, row, column);
+ }
+ 
+ __global__ void initialize_activation_batch(
+@@ -289,7 +293,7 @@ __global__ void initialize_activation_batch(
+     if (value >= KOALA_BEAR_MODULUS) value -= KOALA_BEAR_MODULUS;
+     value = cube_field(value);
+     if (activations != nullptr) activations[index] = value;  // fork: only the last layer is stored
+-    write_centered_limbs(value, limbs + lane * 4 * cells, cells, within_lane);
++    write_centered_limbs(value, limbs + lane * 4 * cells, width, row, column);
+ }
+ 
+ __global__ void reduce_layer_batch(
+@@ -304,17 +308,17 @@ __global__ void reduce_layer_batch(
+     const size_t lane = index / cells;
+     const size_t within_lane = index - lane * cells;
+     const size_t lane_limb_offset = lane * 4 * cells;
++    const uint32_t row = static_cast<uint32_t>(within_lane / width);
++    const uint32_t column = static_cast<uint32_t>(within_lane % width);
++    const size_t acc_base = lane_limb_offset + 4 * size_t(row) * width + column;
+     const int64_t dot =
+-        int64_t(limb_accumulators[lane_limb_offset + within_lane]) +
+-        256LL * int64_t(limb_accumulators[lane_limb_offset + cells + within_lane]) +
++        int64_t(limb_accumulators[acc_base]) +
++        256LL * int64_t(limb_accumulators[width + acc_base]) +
+         65'536LL *
+-            int64_t(limb_accumulators[lane_limb_offset + 2 * cells + within_lane]) +
+-        16'777'216LL *
+-            int64_t(limb_accumulators[lane_limb_offset + 3 * cells + within_lane]) +
++            int64_t(limb_accumulators[2 * width + acc_base]) +
++        16'777'216LL * int64_t(limb_accumulators[3 * width + acc_base]) +
+         CENTER_OFFSET * int64_t(weight_row_sums[within_lane % width]);
+     const uint32_t accumulator = canonicalize_signed(dot);
+-    const uint32_t row = static_cast<uint32_t>(within_lane / width);
+-    const uint32_t column = static_cast<uint32_t>(within_lane % width);
+     const uint32_t row_bits = __ffs(static_cast<int>(rows)) - 1;
+     const uint32_t column_bits = __ffs(static_cast<int>(width)) - 1;
+     const uint32_t* lane_coefficients =
+@@ -328,7 +332,7 @@ __global__ void reduce_layer_batch(
+     if (preactivations != nullptr) preactivations[index] = value;  // fork: unused in search
+     value = cube_field(value);
+     if (activations != nullptr) activations[index] = value;  // fork: only the last layer is stored
+-    write_centered_limbs(value, limbs + lane * 4 * cells, cells, within_lane);
++    write_centered_limbs(value, limbs + lane_limb_offset, width, row, column);
+ }
+ 
+ // Volta has signed INT8 DP4A but not the SM75 INT8 Tensor Core instruction.
+-- 
+2.43.0
+

@@ -18,8 +18,8 @@ FreeForgeMiner switches them to the Ampere path and computes the final BLAKE3 di
 
 | GPU series | What FreeForgeMiner adds | Status |
 |---|---|---|
-| RTX 30xx (Ampere, sm_86) | Ampere Tensor Core path + GPU digest | **main target, tested** |
-| RTX 40xx (Ada, sm_89) | GPU digest only (upstream already used the fast path) | tested on RTX 4070 Ti: 25.7 FW/s (v1.1.0; was 23.7) — **CMFD GPU miner r13 is still slightly faster on this card (25.9 FW/s)** |
+| RTX 30xx (Ampere, sm_86) | Ampere Tensor Core path + GPU digest + fused GEMM+reduce kernel (1.2.0) | **main target, tested: ~20 FW/s on RTX 3070** |
+| RTX 40xx (Ada, sm_89) | GPU digest + fused GEMM+reduce kernel (1.2.0) | tested on RTX 4070 Ti: ~30.5 FW/s on the pool (32.4 in GPU benchmark) |
 | RTX 20xx (Turing), RTX 50xx (Blackwell), Volta, Hopper | GPU digest | built, not yet tested by us |
 
 ### 2. Measured performance
@@ -28,7 +28,7 @@ All numbers are real measurements, with the conditions stated.
 
 | Test | Official / other miner | FreeForgeMiner |
 |---|---|---|
-| 1× RTX 3070, PCIe x1, stock clocks, full cycle (bench, 2026-10-07) | official Common Foundry code: **10.3 FW/s** | **16.4–16.9 FW/s** |
+| 1× RTX 3070, PCIe x1, stock clocks, full cycle (bench, 2026-10-07) | official Common Foundry code: **10.3 FW/s** | **16.4–16.9 FW/s** (1.1.x); **~20 FW/s** with 1.2.0 (GPU benchmark 14.9 → 20.0) |
 | Rig 8× RTX 3070, core lock 1560 MHz, hashrate reported to cmfd-pool.online (2026-10-07) | CMFD GPU miner r13 (lucasan123): **113.2 FW/s** | **116.7 FW/s** |
 
 Results are bit-for-bit identical to upstream and shares are accepted by the pools
@@ -109,6 +109,7 @@ The Tensor Core path loads the GPU much harder than older miners. A profile that
   and **no** `SHARE REJECTED`. On our cards +275 and +225 caused errors on some GPUs, +175 was stable.
   Each card is different: in HiveOS you can set a value per card (`175 175 275 ...`).
 * **Never change clocks while the miner is running.** Set OC, then (re)start the miner.
+* **1.2.0 note:** the fused kernel loads the GPU more densely. After updating, check the log for `INTEGRITY | ok` and no rejected/invalid shares. If a heavily undervolted card shows `INTEGRITY ERROR` or crashes, lower its core offset by 50.
 * Stock clocks are always safe (~16.5 FW/s, ~250 W per RTX 3070).
 
 ### 8. Reading the log
@@ -157,6 +158,7 @@ Run one process per GPU (`--gpu N`). The first run needs the model and the launc
 
 ### Changelog
 
+* **1.2.0** - new fused GEMM+reduce GPU kernel (int8 tensor cores, layer reduce in registers): RTX 3070 14.9 -> 20.0 FW/s (+34 %), RTX 4070 Ti 26.1 -> 32.4 FW/s (+24 %) in the GPU benchmark; on the pool 4070 Ti 25.6 -> 30.5 FW/s. Bit-exact with the reference (determinism and digest checks), uses ~4x less GPU memory. Works on RTX 30/40/50 (sm_80+); older GPUs use the previous path. `CMFD_FUSED=-1` restores the old kernel.
 * **1.1.1** - log banner shows the real release version.
 * **1.1.0** - persistent search buffers and no dead stores of per-layer activations/preactivations. RTX 4070 Ti: 23.7 -> 25.7 FW/s (+9 %, ~185 W); RTX 3070: 14.56 -> 14.69 FW/s (+1 %). Bit-exact (determinism and digest verified), 0 rejected / 0 invalid on the pool.
 * **1.0.6** - correct hashrate with batch 64 (12 GB+ cards).
@@ -174,8 +176,8 @@ FreeForgeMiner — майнер с открытым кодом для **Common F
 
 | Серия | Что даёт FreeForgeMiner | Статус |
 |---|---|---|
-| RTX 30xx (Ampere) | путь Ampere на тензорных ядрах + хеш на GPU | **основная цель, проверено** |
-| RTX 40xx (Ada) | только хеш на GPU (быстрый путь у официального кода уже был) | проверено на RTX 4070 Ti: 25,7 FW/s (v1.1.0; было 23,7) — **CMFD GPU miner r13 на этой карте пока чуть быстрее (25,9 FW/s)** |
+| RTX 30xx (Ampere) | путь Ampere на тензорных ядрах + хеш на GPU + объединённое ядро GEMM+reduce (1.2.0) | **основная цель, проверено: ~20 FW/s на RTX 3070** |
+| RTX 40xx (Ada) | хеш на GPU + объединённое ядро GEMM+reduce (1.2.0) | проверено на RTX 4070 Ti: ~30,5 FW/s на пуле (32,4 в тесте GPU) |
 | RTX 20xx, RTX 50xx, Volta, Hopper | хеш на GPU | собрано, нами пока не проверялось |
 
 ### 2. Измеренная производительность
@@ -184,7 +186,7 @@ FreeForgeMiner — майнер с открытым кодом для **Common F
 
 | Замер | Официальный / другой майнер | FreeForgeMiner |
 |---|---|---|
-| 1× RTX 3070, PCIe x1, сток, полный цикл (стенд, 07.10.2026) | официальный код Common Foundry: **10,3 FW/s** | **16,4–16,9 FW/s** |
+| 1× RTX 3070, PCIe x1, сток, полный цикл (стенд, 07.10.2026) | официальный код Common Foundry: **10,3 FW/s** | **16,4–16,9 FW/s** (1.1.x); **~20 FW/s** с 1.2.0 (тест GPU 14,9 → 20,0) |
 | Риг 8× RTX 3070, фиксация ядра 1560 МГц, мощность на cmfd-pool.online (07.10.2026) | CMFD GPU miner r13 (lucasan123): **113,2 FW/s** | **116,7 FW/s** |
 
 Результаты побитово совпадают с официальными, пулы (cmfd-pool.online, Aria) принимают шары, ошибочных доказательств 0.
@@ -263,6 +265,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
   и **нет** `SHARE REJECTED`. На наших картах +275 и +225 давали ошибки на части GPU, +175 — стабильно.
   Каждая карта своя: в HiveOS можно задать значение для каждой карты (`175 175 275 ...`).
 * **Не меняйте частоты при работающем майнере.** Сначала разгон, потом (пере)запуск майнера.
+* **Заметка к 1.2.0:** новое ядро нагружает карту плотнее. После обновления проверьте в логе `INTEGRITY | ok` и отсутствие rejected/invalid шар. Если сильно андервольтнутая карта показывает `INTEGRITY ERROR` или падает, уменьшите смещение ядра на 50.
 * Сток безопасен всегда (~16,5 FW/s, ~250 Вт на RTX 3070).
 
 ### 8. Как читать лог
@@ -309,6 +312,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 
 ### Список изменений
 
+* **1.2.0** - новое объединённое ядро GEMM+reduce (int8 тензорные ядра, свёртка слоя в регистрах): RTX 3070 14,9 -> 20,0 FW/s (+34 %), RTX 4070 Ti 26,1 -> 32,4 FW/s (+24 %) в тесте GPU; на пуле 4070 Ti 25,6 -> 30,5 FW/s. Побитово совпадает с эталоном (проверки детерминизма и дайджеста), памяти GPU нужно примерно в 4 раза меньше. Работает на RTX 30/40/50 (sm_80+); старые карты идут по прежнему пути. `CMFD_FUSED=-1` возвращает старое ядро.
 * **1.1.1** - баннер в логе показывает реальную версию релиза.
 * **1.1.0** - постоянные буферы поиска, убраны лишние записи активаций и преактиваций по слоям. RTX 4070 Ti: 23,7 -> 25,7 FW/s (+9 %, ~185 Вт); RTX 3070: 14,56 -> 14,69 FW/s (+1 %). Результат побитово тот же (детерминизм и дайджест проверены), на пуле 0 отклонённых / 0 ошибочных.
 * **1.0.6** - корректный хешрейт при batch 64 (карты от 12 ГБ).
