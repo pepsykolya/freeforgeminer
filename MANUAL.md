@@ -39,7 +39,7 @@ compare effective hashrate over several hours, not minutes.
 
 * NVIDIA GPU with **8 GB VRAM or more**.
 * NVIDIA driver **R575 or newer** (CUDA 12.9 runtime is bundled).
-* HiveOS (Ubuntu 22.04 based) or any Linux x86_64 with glibc 2.34+.
+* HiveOS (Ubuntu 22.04 based), any Linux x86_64 with glibc 2.34+, or **Windows 10/11 x64** (section 12).
 * ~6.5 GB free disk for the model (shared between miners, downloaded once).
 
 ### 4. HiveOS setup (step by step)
@@ -143,6 +143,8 @@ Code: `patches/0003-*`.
 | `worker temporarily banned` | your IP is banned by the pool for rejected shares: stop all miners on that IP for ~1 hour, fix OC, start one rig first |
 | `INTEGRITY | ERROR` or many `SHARE REJECTED` | lower the core offset of that GPU, restart the miner |
 | model download fails | check DNS/internet on the rig; the model comes from the official Common Foundry CDN |
+| Windows: hashrate 0.5-2 FW/s instead of ~20 | the 6.4 GB model does not fit into free VRAM and Windows moves part of it to RAM: close programs that use the GPU (local AI models, games, browser hardware acceleration); `start.bat` warns when less than ~7000 MiB are free |
+| Windows: archive or `.exe` blocked by Defender / SmartScreen | *More info → Run anyway*, or add the miner folder to Defender exclusions; check the archive SHA-256 from the release page |
 
 ### 11. Linux without HiveOS
 
@@ -154,10 +156,41 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 ```
 Run one process per GPU (`--gpu N`). The first run needs the model and the launch files (`production-mainnet/`) from the archive.
 
+### 12. Windows 10/11
+
+Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed
+(tested on driver 572.70, RTX 4070 Laptop: ~20 FW/s, bit-exact with the Linux build).
+
+1. Download **`freeforgeminer-1.2.0-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.0/freeforgeminer-1.2.0-windows-x64.zip`
+2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForgeMiner`.
+3. Right-click **`start.bat`** → *Edit* and set:
+
+| Setting | Value |
+|---|---|
+| `WALLET` | your CMFD address (64 hex characters) |
+| `POOL` | one full `cmfd+tls://…` URL from section 5 (default: cmfd-pool.online) |
+| `WORKER` | rig name, default = computer name |
+| `GPUS` | empty = all NVIDIA GPUs, or a list like `0,1` (indexes from `nvidia-smi`) |
+| `BATCH` | empty = automatic, or 1-64 |
+| `PER_GPU_WORKERS` | `0` = the PC is one worker on the pool, `1` = one worker per GPU |
+
+4. Double-click **`start.bat`**. The first start downloads the 6.4 GB model once (16 parallel parts, every part
+   SHA-256-verified, ~10-30 min depending on the connection). Later starts only re-check it (~1 min).
+5. One miner process runs per GPU; their lines are shown in one window as `[GPU0] …`, `[GPU1] …` and saved to
+   `logs\gpuN.log`. A process that exits is restarted automatically after 15 s. `Ctrl+C` stops everything.
+
+* **VRAM:** the model takes ~6.7 GB of video memory. On 8 GB cards close everything else that uses the GPU — if it
+  does not fit, Windows silently moves part of it to system RAM and the hashrate drops to ~0.5 FW/s.
+* **Overclocking:** use MSI Afterburner (core lock via the curve editor + core offset, memory stock); the rules from
+  section 7 apply unchanged. Laptops: plug in the charger and choose the maximum performance mode.
+* Autostart: put a shortcut to `start.bat` into `shell:startup`.
+
 ---
 
 ### Changelog
 
+* **1.2.0 Windows** - native Windows 10/11 x64 build of 1.2.0 (no WSL): `start.bat` launcher, one process per GPU, automatic model download and restart. Same code and results as the Linux build.
 * **1.2.0** - new fused GEMM+reduce GPU kernel (int8 tensor cores, layer reduce in registers): RTX 3070 14.9 -> 20.0 FW/s (+34 %), RTX 4070 Ti 26.1 -> 32.4 FW/s (+24 %) in the GPU benchmark; on the pool 4070 Ti 25.6 -> 30.5 FW/s. Bit-exact with the reference (determinism and digest checks), uses ~4x less GPU memory. Works on RTX 30/40/50 (sm_80+); older GPUs use the previous path. `CMFD_FUSED=-1` restores the old kernel.
 * **1.1.1** - log banner shows the real release version.
 * **1.1.0** - persistent search buffers and no dead stores of per-layer activations/preactivations. RTX 4070 Ti: 23.7 -> 25.7 FW/s (+9 %, ~185 W); RTX 3070: 14.56 -> 14.69 FW/s (+1 %). Bit-exact (determinism and digest verified), 0 rejected / 0 invalid on the pool.
@@ -196,7 +229,7 @@ FreeForgeMiner — майнер с открытым кодом для **Common F
 
 * Видеокарта NVIDIA с **8 ГБ памяти и больше**.
 * Драйвер NVIDIA **R575 или новее** (среда CUDA 12.9 уже внутри архива).
-* HiveOS (на базе Ubuntu 22.04) или любой Linux x86_64 с glibc 2.34+.
+* HiveOS (на базе Ubuntu 22.04), любой Linux x86_64 с glibc 2.34+ или **Windows 10/11 x64** (раздел 12).
 * ~6,5 ГБ на диске под модель (общая для майнеров, качается один раз).
 
 ### 4. Настройка в HiveOS (по шагам)
@@ -299,6 +332,8 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 | `worker temporarily banned` | ваш IP забанен пулом за отклонённые шары: остановите все майнеры за этим IP примерно на час, исправьте разгон, запускайте сначала один риг |
 | `INTEGRITY | ERROR` или много `SHARE REJECTED` | снизьте смещение этой карте, перезапустите майнер |
 | не качается модель | проверьте DNS/интернет на риге; модель берётся с официального CDN Common Foundry |
+| Windows: хешрейт 0,5–2 FW/s вместо ~20 | модель 6,4 ГБ не помещается в свободную видеопамять, и Windows выносит её часть в ОЗУ: закройте программы, занимающие видеокарту (локальные нейросети, игры, аппаратное ускорение браузера); `start.bat` предупреждает, если свободно меньше ~7000 МиБ |
+| Windows: архив или `.exe` блокирует Defender / SmartScreen | *Подробнее → Выполнить в любом случае* или добавьте папку майнера в исключения Defender; сверьте SHA-256 архива со страницей релиза |
 
 ### 11. Linux без HiveOS
 
@@ -310,8 +345,40 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 ```
 По процессу на каждую карту (`--gpu N`). Для первого запуска нужны модель и файлы запуска сети (`production-mainnet/`) из архива.
 
+### 12. Windows 10/11
+
+Нативная сборка под Windows — без WSL, без установки CUDA и Python. Нужен только драйвер NVIDIA
+(проверено на драйвере 572.70, RTX 4070 Laptop: ~20 FW/s, результат побитово как у Linux-сборки).
+
+1. Скачайте **`freeforgeminer-1.2.0-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.0/freeforgeminer-1.2.0-windows-x64.zip`
+2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForgeMiner`.
+3. Правой кнопкой по **`start.bat`** → *Изменить* и задайте:
+
+| Параметр | Значение |
+|---|---|
+| `WALLET` | ваш CMFD-адрес (64 шестнадцатеричных символа) |
+| `POOL` | одна строка `cmfd+tls://…` целиком из раздела 5 (по умолчанию cmfd-pool.online) |
+| `WORKER` | имя рига, по умолчанию — имя компьютера |
+| `GPUS` | пусто = все карты NVIDIA, или список вида `0,1` (номера из `nvidia-smi`) |
+| `BATCH` | пусто = автоматически, или 1–64 |
+| `PER_GPU_WORKERS` | `0` = весь ПК один воркер на пуле, `1` = отдельный воркер на каждую карту |
+
+4. Запустите **`start.bat`** двойным щелчком. При первом запуске модель 6,4 ГБ скачивается один раз (16 частей
+   параллельно, каждая проверяется по SHA-256, ~10–30 минут в зависимости от интернета). Дальше при запуске она только
+   перепроверяется (~1 минута).
+5. На каждую карту — свой процесс майнера; их строки видны в одном окне как `[GPU0] …`, `[GPU1] …` и пишутся в
+   `logs\gpuN.log`. Упавший процесс перезапускается автоматически через 15 с. `Ctrl+C` останавливает всё.
+
+* **Видеопамять:** модель занимает ~6,7 ГБ. На картах 8 ГБ закройте всё, что использует видеокарту, — если модель
+  не поместится, Windows молча вынесет её часть в оперативную память и хешрейт упадёт до ~0,5 FW/s.
+* **Разгон:** MSI Afterburner (фиксация частоты через редактор кривой + смещение ядра, память сток); правила из
+  раздела 7 те же. Ноутбуки: подключите зарядку и включите режим максимальной производительности.
+* Автозапуск: положите ярлык `start.bat` в `shell:startup`.
+
 ### Список изменений
 
+* **1.2.0 Windows** - нативная сборка 1.2.0 под Windows 10/11 x64 (без WSL): запуск через `start.bat`, процесс на каждую карту, автоматическая загрузка модели и перезапуск. Код и результаты те же, что у Linux-сборки.
 * **1.2.0** - новое объединённое ядро GEMM+reduce (int8 тензорные ядра, свёртка слоя в регистрах): RTX 3070 14,9 -> 20,0 FW/s (+34 %), RTX 4070 Ti 26,1 -> 32,4 FW/s (+24 %) в тесте GPU; на пуле 4070 Ti 25,6 -> 30,5 FW/s. Побитово совпадает с эталоном (проверки детерминизма и дайджеста), памяти GPU нужно примерно в 4 раза меньше. Работает на RTX 30/40/50 (sm_80+); старые карты идут по прежнему пути. `CMFD_FUSED=-1` возвращает старое ядро.
 * **1.1.1** - баннер в логе показывает реальную версию релиза.
 * **1.1.0** - постоянные буферы поиска, убраны лишние записи активаций и преактиваций по слоям. RTX 4070 Ti: 23,7 -> 25,7 FW/s (+9 %, ~185 Вт); RTX 3070: 14,56 -> 14,69 FW/s (+1 %). Результат побитово тот же (детерминизм и дайджест проверены), на пуле 0 отклонённых / 0 ошибочных.

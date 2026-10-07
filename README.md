@@ -55,6 +55,13 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
   profile that looks stable elsewhere can return silently wrong results (no shares) or crash with Xid 13.
   Prefer stock clocks or a plain power limit, and watch for `INTEGRITY | ok` in the log.
 
+## Windows 10/11
+
+Native Windows build (no WSL, no CUDA or Python to install — only the NVIDIA driver):
+download `freeforgeminer-1.2.0-windows-x64.zip` from the [release page](https://github.com/pepsykolya/freeforgeminer/releases/tag/v1.2.0),
+unpack to e.g. `C:\FreeForgeMiner`, edit `WALLET` / `POOL` / `WORKER` in `start.bat`, run it.
+Step by step: [MANUAL.md section 12](MANUAL.md#12-windows-1011).
+
 ## Build from source
 
 ```bash
