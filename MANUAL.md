@@ -19,7 +19,7 @@ FreeForgeMiner switches them to the Ampere path and computes the final BLAKE3 di
 | GPU series | What FreeForgeMiner adds | Status |
 |---|---|---|
 | RTX 30xx (Ampere, sm_86) | Ampere Tensor Core path + GPU digest | **main target, tested** |
-| RTX 40xx (Ada, sm_89) | GPU digest (upstream already used the fast path) | built, smaller gain |
+| RTX 40xx (Ada, sm_89) | GPU digest only (upstream already used the fast path) | tested on RTX 4070 Ti: 23.7 FW/s — **CMFD GPU miner r13 is currently faster on this card (25.9 FW/s)** |
 | RTX 20xx (Turing), RTX 50xx (Blackwell), Volta, Hopper | GPU digest | built, not yet tested by us |
 
 ### 2. Measured performance
@@ -168,7 +168,7 @@ FreeForgeMiner — майнер с открытым кодом для **Common F
 | Серия | Что даёт FreeForgeMiner | Статус |
 |---|---|---|
 | RTX 30xx (Ampere) | путь Ampere на тензорных ядрах + хеш на GPU | **основная цель, проверено** |
-| RTX 40xx (Ada) | хеш на GPU (быстрый путь у официального кода уже был) | собрано, прибавка меньше |
+| RTX 40xx (Ada) | только хеш на GPU (быстрый путь у официального кода уже был) | проверено на RTX 4070 Ti: 23,7 FW/s — **CMFD GPU miner r13 на этой карте сейчас быстрее (25,9 FW/s)** |
 | RTX 20xx, RTX 50xx, Volta, Hopper | хеш на GPU | собрано, нами пока не проверялось |
 
 ### 2. Измеренная производительность
