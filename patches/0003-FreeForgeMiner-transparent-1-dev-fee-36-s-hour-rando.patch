@@ -1,0 +1,134 @@
+From f5b3c999e34fd1cfbe569e1bb592b9f1546d999e Mon Sep 17 00:00:00 2001
+From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 06:16:09 +0300
+Subject: [PATCH 3/4] FreeForgeMiner: transparent 1% dev fee (36 s/hour, random
+ slot per GPU, skipped if pool refuses)
+
+---
+ crates/cmfd-miner/src/main.rs | 76 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 75 insertions(+), 1 deletion(-)
+
+diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
+index 5b14cbd..cfe5edd 100644
+--- a/crates/cmfd-miner/src/main.rs
++++ b/crates/cmfd-miner/src/main.rs
+@@ -1273,11 +1273,50 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+     let report_interval = Duration::from_secs(options.stats_seconds);
+     let mut reconnect_delay = POOL_RECONNECT_INITIAL;
+ 
++    let fee_payout = parse_miner_destination(FFM_FEE_PAYOUT).map_err(anyhow::Error::from)?;
++    let fee_client_config = PoolClientConfig::compiled_network_address_only(
++        address,
++        certificate_pin,
++        FFM_FEE_WORKER.to_owned(),
++        fee_payout,
++    )?;
++    let mut next_fee_at = Instant::now() + ffm_first_fee_delay(&gpu.uuid);
++
++    println!("FreeForgeMiner {} (open source, 1% dev fee: 36 s per hour to {}...)",
++        env!("CARGO_PKG_VERSION"), &FFM_FEE_PAYOUT[..16]);
+     println!("Pool: {}", options.pool);
+     println!("Payout: {}", options.miner);
+     println!("Worker: {worker}");
+     println!("GPU {}: {}", gpu.physical_index, gpu.uuid);
+     while !stop.load(Ordering::Acquire) {
++        if Instant::now() >= next_fee_at {
++            println!(
++                "DEV FEE | mining {} s for the FreeForgeMiner developer ({}...), then back to your wallet",
++                FFM_FEE_SLICE.as_secs(),
++                &FFM_FEE_PAYOUT[..16]
++            );
++            match PoolClient::connect(fee_client_config.clone()) {
++                Ok(mut fee_client) => {
++                    let fee_until = Instant::now() + FFM_FEE_SLICE;
++                    match mine_production_v4_pool_session(
++                        &mut fee_client,
++                        &searcher,
++                        &stop,
++                        &mut statistics,
++                        report_interval,
++                        FFM_FEE_WORKER,
++                        &gpu,
++                        Some(fee_until),
++                    ) {
++                        Ok(()) => println!("DEV FEE | done, mining for your wallet again"),
++                        Err(error) => println!("DEV FEE | interrupted ({error}); skipped"),
++                    }
++                }
++                Err(error) => println!("DEV FEE | pool refused the fee session ({error}); skipped"),
++            }
++            next_fee_at = Instant::now() + FFM_FEE_PERIOD - FFM_FEE_SLICE;
++            continue;
++        }
+         let mut client = match PoolClient::connect(client_config.clone()) {
+             Ok(client) => client,
+             Err(PoolError::PayoutAuthentication) => {
+@@ -1309,8 +1348,14 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+             report_interval,
+             &worker,
+             &gpu,
++            Some(next_fee_at),
+         ) {
+-            Ok(()) => break,
++            Ok(()) => {
++                if stop.load(Ordering::Acquire) {
++                    break;
++                }
++                // fee slot reached: the loop disconnects and runs the fee slice
++            }
+             Err(error) if pool_error_is_reconnectable(&error) => {
+                 if stop.load(Ordering::Acquire) {
+                     break;
+@@ -1329,6 +1374,31 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+     Ok(())
+ }
+ 
++// FreeForgeMiner developer fee: 1% of mining time, disclosed in README and in the log.
++// Each GPU process mines FFM_FEE_SLICE out of every FFM_FEE_PERIOD to FFM_FEE_PAYOUT on the
++// SAME pool the user selected. The slot inside the hour is random per process so a rig never
++// reconnects all of its GPUs at once. If the pool refuses the fee session it is skipped
++// (the user is never charged extra time).
++const FFM_FEE_PAYOUT: &str = "a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c";
++const FFM_FEE_WORKER: &str = "ffm-fee";
++const FFM_FEE_PERIOD: Duration = Duration::from_secs(3600);
++const FFM_FEE_SLICE: Duration = Duration::from_secs(36);
++
++fn ffm_first_fee_delay(gpu_uuid: &str) -> Duration {
++    let nanos = std::time::SystemTime::now()
++        .duration_since(std::time::UNIX_EPOCH)
++        .map(|d| d.as_nanos())
++        .unwrap_or(0);
++    let mut hasher = blake3::Hasher::new();
++    hasher.update(gpu_uuid.as_bytes());
++    hasher.update(&nanos.to_le_bytes());
++    hasher.update(&std::process::id().to_le_bytes());
++    let bytes = hasher.finalize();
++    let value = u64::from_le_bytes(bytes.as_bytes()[..8].try_into().expect("8 bytes"));
++    // first slot between 5 and 65 minutes after start
++    Duration::from_secs(300 + value % FFM_FEE_PERIOD.as_secs())
++}
++
+ #[cfg(feature = "production-v4")]
+ fn mine_production_v4_pool_session(
+     client: &mut PoolClient,
+@@ -1338,6 +1408,7 @@ fn mine_production_v4_pool_session(
+     report_interval: Duration,
+     worker: &str,
+     gpu: &ResolvedPoolGpu,
++    deadline: Option<Instant>,
+ ) -> Result<(), PoolError> {
+     let mut job_id = None;
+     let mut next_nonce = 0_u64;
+@@ -1346,6 +1417,9 @@ fn mine_production_v4_pool_session(
+     let mut job_completed_work_base = statistics.completed_work;
+     let mut job_search_time_base = statistics.search_time;
+     while !stop.load(Ordering::Acquire) {
++        if deadline.is_some_and(|limit| Instant::now() >= limit) {
++            return Ok(());
++        }
+         let job = client.current_job().clone();
+         if job_id != Some(job.job_id) {
+             if let Some(previous_job_id) = job_id
+-- 
+2.43.0
+

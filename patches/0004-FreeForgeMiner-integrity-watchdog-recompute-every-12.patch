@@ -1,0 +1,65 @@
+From fe3192a48ec935457b9086bcb68db911920c7c1b Mon Sep 17 00:00:00 2001
+From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 06:29:38 +0300
+Subject: [PATCH 4/4] FreeForgeMiner: integrity watchdog (recompute every 128th
+ batch, loud warning on GPU errors)
+
+---
+ crates/cmfd-node/src/production_v4_pool.rs | 41 ++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/crates/cmfd-node/src/production_v4_pool.rs b/crates/cmfd-node/src/production_v4_pool.rs
+index fe7afda..568f2b7 100644
+--- a/crates/cmfd-node/src/production_v4_pool.rs
++++ b/crates/cmfd-node/src/production_v4_pool.rs
+@@ -619,6 +619,47 @@ impl ProductionV4PersistentPoolSearcher {
+                 "CMFD_V4_REPLAY_DONE",
+             )?;
+             let digests = read_exact_file(&search_digest_path, 32 * batch_size as usize)?;
++            // FreeForgeMiner integrity watchdog: every 128th batch is recomputed on the classic
++            // path (full activation + CPU BLAKE3). A mismatch means the GPU returns wrong results,
++            // almost always from an unstable overclock/undervolt, and is reported loudly.
++            if attempt_number % 128 == 3 {
++                state.replay.invoke(
++                    &[
++                        "RUNBATCH".to_owned(),
++                        batch_size.to_string(),
++                        self.worker_path(&coefficients_path)?,
++                        self.worker_path(&search_prefix)?,
++                    ],
++                    "CMFD_V4_REPLAY_DONE",
++                )?;
++                let full = read_exact_file(
++                    &search_final_path,
++                    FORGEMATRIX_V4_PUBLIC_FINAL_ACTIVATION_BYTES * batch_size as usize,
++                )?;
++                let mut mismatches = 0;
++                for lane in 0..batch_size as usize {
++                    let challenge: [u8; 32] = challenges[lane * 32..lane * 32 + 32]
++                        .try_into()
++                        .expect("32-byte challenge");
++                    let cpu = final_activation_digest_from_bytes(
++                        challenge,
++                        &full[lane * FORGEMATRIX_V4_PUBLIC_FINAL_ACTIVATION_BYTES
++                            ..(lane + 1) * FORGEMATRIX_V4_PUBLIC_FINAL_ACTIVATION_BYTES],
++                    )?;
++                    if cpu[..] != digests[lane * 32..lane * 32 + 32] {
++                        mismatches += 1;
++                    }
++                }
++                if mismatches == 0 {
++                    println!("INTEGRITY | ok ({batch_size} lanes recomputed and matched)");
++                } else {
++                    println!(
++                        "INTEGRITY | ERROR: {mismatches}/{batch_size} lanes differ between two runs of the same work. \
++                         This GPU returns wrong results (unstable overclock/undervolt or hardware fault): \
++                         shares will be rejected or never found. Lower the core offset / clocks and restart."
++                    );
++                }
++            }
+             if stop.load(std::sync::atomic::Ordering::Acquire) {
+                 return Ok(PoolWorkSearchResult::Cancelled {
+                     attempts_completed: u64::from(batch_size),
+-- 
+2.43.0
+
