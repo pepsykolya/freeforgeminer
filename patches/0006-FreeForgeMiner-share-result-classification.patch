@@ -1,0 +1,34 @@
+From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
+Subject: [PATCH 6/6] FreeForgeMiner: share result classification (stale is not a reject, pool-side codes, reject codes in the log)
+
+---
+diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
+index 3be0477..ecbd38a 100644
+--- a/crates/cmfd-miner/src/main.rs
++++ b/crates/cmfd-miner/src/main.rs
+@@ -1531,11 +1531,22 @@ fn mine_production_v4_pool_session(
+         }
+         if submitted.accepted {
+             statistics.accepted = statistics.accepted.saturating_add(1);
++        } else if matches!(submitted.code.as_str(), "stale" | "stale_job") {
++            // A new block arrived while the share was in flight: harmless, not a GPU problem.
++            statistics.stale = statistics.stale.saturating_add(1);
++            println!("SHARE STALE | code={} (block changed before the share arrived; harmless)", submitted.code);
++        } else if matches!(
++            submitted.code.as_str(),
++            "backend_unavailable" | "verifier_busy" | "share_rate_limited" | "node_unavailable"
++        ) {
++            statistics.rejected = statistics.rejected.saturating_add(1);
++            println!("SHARE NOT CREDITED | code={} (pool-side condition, not a GPU problem)", submitted.code);
+         } else {
+             statistics.rejected = statistics.rejected.saturating_add(1);
+-            if submitted.code == "stale_job" {
+-                statistics.stale = statistics.stale.saturating_add(1);
+-            }
++            println!(
++                "SHARE REJECTED | code={} | nonce {} | if this repeats, the GPU is likely computing wrong results: lower the core offset/clocks",
++                submitted.code, nonce
++            );
+         }
+         if submitted.block_accepted {
+             statistics.blocks = statistics.blocks.saturating_add(1);

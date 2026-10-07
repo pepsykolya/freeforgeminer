@@ -8,6 +8,8 @@ Every change against upstream is published in [`patches/`](patches) — includin
 
 > **Free** = free and open source. **Fee** = 1 %, disclosed below and printed in the miner log.
 
+**Full manual (HiveOS setup, every pool with URL and pin, overclocking, log lines, troubleshooting): [MANUAL.md](MANUAL.md) — EN / RU.**
+
 ## Why it is faster
 
 | Change | Effect |
@@ -37,7 +39,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Field | Value |
 |---|---|
 | Miner name | `freeforgeminer` |
-| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.0.2/freeforgeminer-1.0.2.tar.gz` |
+| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.0.3/freeforgeminer-1.0.3.tar.gz` |
 | Hash algorithm | `forgematrix_v4` |
 | Wallet and worker template | `YOUR_64_HEX_CMFD_ADDRESS.%WORKER_NAME%` |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |
