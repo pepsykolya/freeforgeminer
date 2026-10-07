@@ -27,7 +27,7 @@ MAX_SAMPLE_AGE=45
 
 
 def validate_config(value,root):
-    required={'wallet','pool','worker','gpus','model_dir','state_dir'}
+    required={'wallet','pool','worker','gpus','model_dir','state_dir','per_gpu_workers'}
     if not isinstance(value,dict) or set(value)!=required: raise ValueError('invalid miner config')
     if not isinstance(value['wallet'],str) or not re.fullmatch(r'[0-9a-fA-F]{64}',value['wallet']):
         raise ValueError('wallet template must contain the 64-character destination public key')
@@ -42,6 +42,7 @@ def validate_config(value,root):
         raise ValueError('worker name must contain 1-24 letters, numbers, dots, underscores or hyphens')
     if not isinstance(value['gpus'],list) or len(value['gpus'])>64 or any(type(gpu)!=int or not 0<=gpu<=255 for gpu in value['gpus']) or len(set(value['gpus']))!=len(value['gpus']):
         raise ValueError('gpus must be a JSON list of distinct NVIDIA GPU indices')
+    if not isinstance(value['per_gpu_workers'],bool):raise ValueError('per_gpu_workers must be true or false')
     for key in ('model_dir','state_dir'):
         path=Path(value[key])
         if not path.is_absolute() or len(path.parts)<4 or root==path.resolve() or root in path.resolve().parents:
@@ -63,8 +64,8 @@ def configure(args):
     invalid.write_text('The latest flight-sheet configuration has not validated.\n')
     raw=os.environ.get('CMFD_HIVE_OPTIONS','').strip()
     options=json.loads(raw) if raw else {}
-    if not isinstance(options,dict) or set(options)-{'worker','gpus','model_dir','state_dir'}:
-        raise ValueError('extra configuration must be a JSON object with worker, gpus, model_dir or state_dir')
+    if not isinstance(options,dict) or set(options)-{'worker','gpus','model_dir','state_dir','per_gpu_workers'}:
+        raise ValueError('extra configuration must be a JSON object with worker, gpus, model_dir, state_dir or per_gpu_workers')
     template=os.environ.get('CMFD_HIVE_TEMPLATE','').strip()
     wallet,separator,template_worker=template.partition('.')
     default_worker=template_worker if separator else os.environ.get('CMFD_HIVE_WORKER','worker')
@@ -72,7 +73,8 @@ def configure(args):
     value={'wallet':wallet,'pool':os.environ.get('CMFD_HIVE_URL','').strip(),
            'worker':options.get('worker',default_worker),'gpus':options.get('gpus',[]),
            'model_dir':options.get('model_dir','/hive/miners/custom/cmfd-model'),
-           'state_dir':options.get('state_dir',str(DEFAULT_DATA/'mainnet'))}
+           'state_dir':options.get('state_dir',str(DEFAULT_DATA/'mainnet')),
+           'per_gpu_workers':options.get('per_gpu_workers',False)}
     validate_config(value,args.root.resolve())
     atomic_json(args.config,value)
     invalid.unlink()
@@ -136,6 +138,8 @@ def run(args):
            'started_at':time.time(),'workers':[]}
     children=[];collectors=[];handlers=[]
     env=dict(os.environ)
+    # one pool worker per rig by default; per_gpu_workers=true gives <worker>.gpuN per card
+    env['FFM_SINGLE_WORKER']='0' if config['per_gpu_workers'] else '1'
     env['LD_LIBRARY_PATH']=str(root/'lib')+(':'+env['LD_LIBRARY_PATH'] if env.get('LD_LIBRARY_PATH') else '')
     def interrupted(_signal,_frame):raise KeyboardInterrupt
     signal.signal(signal.SIGTERM,interrupted);signal.signal(signal.SIGINT,interrupted)

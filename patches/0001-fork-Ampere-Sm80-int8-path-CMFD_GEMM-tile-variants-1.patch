@@ -1,7 +1,7 @@
 From 11d4fb250e25762826b2293dc1982bd7ead76cb4 Mon Sep 17 00:00:00 2001
 From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 04:14:32 +0300
-Subject: [PATCH 1/4] fork: Ampere Sm80 int8 path + CMFD_GEMM tile variants
+Subject: [PATCH 1/5] fork: Ampere Sm80 int8 path + CMFD_GEMM tile variants
  (128x128x64 s4 best on 3070: +49%)
 
 ---

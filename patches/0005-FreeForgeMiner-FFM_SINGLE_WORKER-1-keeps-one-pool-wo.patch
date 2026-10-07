@@ -1,0 +1,28 @@
+From c6dffc0295430e37ee7d3c9f4e009a75582bf25a Mon Sep 17 00:00:00 2001
+From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 07:33:39 +0300
+Subject: [PATCH 5/5] FreeForgeMiner: FFM_SINGLE_WORKER=1 keeps one pool worker
+ name for all GPUs of a rig
+
+---
+ crates/cmfd-miner/src/main.rs | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
+index cfe5edd..3be0477 100644
+--- a/crates/cmfd-miner/src/main.rs
++++ b/crates/cmfd-miner/src/main.rs
+@@ -984,7 +984,9 @@ fn resolve_pool_gpu(
+ 
+ #[cfg(feature = "production-v4")]
+ fn pool_worker_name(base: &str, gpu: &ResolvedPoolGpu) -> Result<String> {
+-    let worker = if gpu.named_selection {
++    // FreeForgeMiner: FFM_SINGLE_WORKER=1 keeps one pool worker name for every GPU of a rig.
++    let single = std::env::var("FFM_SINGLE_WORKER").as_deref() == Ok("1");
++    let worker = if gpu.named_selection && !single {
+         format!("{base}.gpu{}", gpu.physical_index)
+     } else {
+         base.to_owned()
+-- 
+2.43.0
+

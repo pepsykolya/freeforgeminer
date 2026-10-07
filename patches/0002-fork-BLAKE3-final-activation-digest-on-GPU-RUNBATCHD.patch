@@ -1,7 +1,7 @@
 From 56ee94502ad4507229616dccb098ca5244c510ef Mon Sep 17 00:00:00 2001
 From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 04:54:07 +0300
-Subject: [PATCH 2/4] fork: BLAKE3 final-activation digest on GPU
+Subject: [PATCH 2/5] fork: BLAKE3 final-activation digest on GPU
  (RUNBATCHDIGEST), miner uses it by default (+17% on PCIe x1)
 
 ---

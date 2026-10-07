@@ -1,7 +1,7 @@
 From f5b3c999e34fd1cfbe569e1bb592b9f1546d999e Mon Sep 17 00:00:00 2001
 From: FreeForgeMiner <pepsykolya@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 06:16:09 +0300
-Subject: [PATCH 3/4] FreeForgeMiner: transparent 1% dev fee (36 s/hour, random
+Subject: [PATCH 3/5] FreeForgeMiner: transparent 1% dev fee (36 s/hour, random
  slot per GPU, skipped if pool refuses)
 
 ---

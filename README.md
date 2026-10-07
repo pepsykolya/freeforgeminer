@@ -37,16 +37,17 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Field | Value |
 |---|---|
 | Miner name | `freeforgeminer` |
-| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.0.1/freeforgeminer-1.0.1.tar.gz` |
+| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.0.2/freeforgeminer-1.0.2.tar.gz` |
 | Hash algorithm | `forgematrix_v4` |
 | Wallet and worker template | `YOUR_64_HEX_CMFD_ADDRESS.%WORKER_NAME%` |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |
-| Extra config (optional) | `{"gpus":[0,1],"worker":"name","model_dir":"/hive/miners/custom/cmfd-model"}` |
+| Extra config (optional) | `{"gpus":[0,1],"worker":"name","per_gpu_workers":false,"model_dir":"/hive/miners/custom/cmfd-model"}` |
 
 * Requires NVIDIA driver R575+ (CUDA 12.9 runtime is bundled).
 * The model is reused from `/hive/miners/custom/cmfd-model` when present (hash-verified), otherwise downloaded once
   from the official Common Foundry CDN.
-* Each GPU appears on the pool as `<worker>.gpuN`.
+* The whole rig is **one worker** on the pool (the pool adds up all cards); HiveOS still shows every card separately.
+  Set `"per_gpu_workers": true` to get `<worker>.gpuN` per card on the pool.
 * **Do not change GPU clocks while the miner is running** — set OC first, then start the miner.
 * **Undervolting is dangerous here.** The Tensor Core path loads the GPU much harder than older miners; an offset/undervolt
   profile that looks stable elsewhere can return silently wrong results (no shares) or crash with Xid 13.
