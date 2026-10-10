@@ -38,7 +38,7 @@ def build(version, sha, whatsnew, windows_zip=None, windows_sha=None):
         sums += f"\n* `{windows_zip}` (Windows): `{windows_sha}`"
     return f"""**FreeForgeMiner {version}** — honest, fast and reliable CMFD (ForgeMatrix V4) miner for NVIDIA GPUs, **best on RTX 30 series**. Open source (MIT), 1 % dev fee.
 
-📖 **Full manual: [English]({REPO}/blob/main/MANUAL.md#english) · [Русский]({REPO}/blob/main/MANUAL.md#русский)** — HiveOS step by step, every pool, overclocking, reading the log, troubleshooting.
+📖 **Full manual: [English]({REPO}/blob/main/MANUAL.md#english) · [Русский]({REPO}/blob/main/MANUAL.md#русский) · [中文]({REPO}/blob/main/MANUAL.md#中文)** — HiveOS step by step, every pool, overclocking, reading the log, troubleshooting.
 
 ### What is new in {version}
 {whatsnew.strip()}

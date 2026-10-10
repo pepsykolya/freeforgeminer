@@ -8,7 +8,7 @@ Every change against upstream is published in [`patches/`](patches) — includin
 
 > **Free** = free and open source. **Fee** = 1 %, disclosed below and printed in the miner log.
 
-**Full manual (HiveOS setup, every pool with URL and pin, overclocking, log lines, troubleshooting): [MANUAL.md](MANUAL.md) — EN / RU.**
+**Full manual (HiveOS setup, every pool with URL and pin, overclocking, log lines, troubleshooting): [MANUAL.md](MANUAL.md) — EN / RU / [中文](MANUAL.md#中文).**
 
 ## Why it is faster
 

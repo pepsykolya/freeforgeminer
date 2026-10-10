@@ -387,3 +387,194 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 * **1.1.1** - баннер в логе показывает реальную версию релиза.
 * **1.1.0** - постоянные буферы поиска, убраны лишние записи активаций и преактиваций по слоям. RTX 4070 Ti: 23,7 -> 25,7 FW/s (+9 %, ~185 Вт); RTX 3070: 14,56 -> 14,69 FW/s (+1 %). Результат побитово тот же (детерминизм и дайджест проверены), на пуле 0 отклонённых / 0 ошибочных.
 * **1.0.6** - корректный хешрейт при batch 64 (карты от 12 ГБ).
+
+## 中文
+
+### 1. 这是什么
+
+FreeForgeMiner 是面向 NVIDIA 显卡的 **Common Foundry (CMFD, ForgeMatrix V4)** 开源矿工。
+它是官方 Common Foundry 矿工（MIT）的分支：共识代码相同、6.4 GB 模型相同，但 GPU 计算更快。
+相对上游的所有改动都在 [`patches/`](patches) 中，包括开发者抽水（dev fee）代码。
+
+**最适合 NVIDIA RTX 30 系列（Ampere）。** 官方代码在 RTX 30 显卡上走的是旧的 Turing Tensor Core 路径；
+FreeForgeMiner 将其切换为 Ampere 路径，并在 GPU 上计算最终的 BLAKE3 摘要。
+
+| 显卡系列 | FreeForgeMiner 的改进 | 状态 |
+|---|---|---|
+| RTX 30xx (Ampere, sm_86) | Ampere Tensor Core 路径 + GPU 摘要 + 融合 GEMM+reduce 内核 (1.2.0) | **主要目标，已测试：RTX 3070 约 20 FW/s** |
+| RTX 40xx (Ada, sm_89) | GPU 摘要 + 融合 GEMM+reduce 内核 (1.2.0) | 已在 RTX 4070 Ti 上测试：矿池上约 30.5 FW/s（GPU 基准测试 32.4） |
+| RTX 20xx (Turing), RTX 50xx (Blackwell), Volta, Hopper | GPU 摘要 | 已编译，我们尚未测试 |
+
+### 2. 实测性能
+
+所有数据均为真实测量，并注明了测试条件。
+
+| 测试 | 官方 / 其他矿工 | FreeForgeMiner |
+|---|---|---|
+| 1× RTX 3070，PCIe x1，默认频率，完整周期（基准测试，2026-10-07） | 官方 Common Foundry 代码：**10.3 FW/s** | **16.4–16.9 FW/s**（1.1.x）；1.2.0 约 **20 FW/s**（GPU 基准测试 14.9 → 20.0） |
+| 8× RTX 3070 矿机，核心锁频 1560 MHz，上报给 cmfd-pool.online 的算力（2026-10-07） | CMFD GPU miner r13 (lucasan123)：**113.2 FW/s** | **116.7 FW/s** |
+
+结果与上游逐位完全一致，提交的份额（share）被矿池（cmfd-pool.online、Aria）接受，无效证明为 0。
+矿池显示的*有效*算力是根据一段时间内的份额计算的；
+请对比数小时的有效算力，而不是几分钟。
+
+### 3. 系统要求
+
+* **显存 8 GB 或以上**的 NVIDIA 显卡。
+* NVIDIA 驱动 **R575 或更新版本**（已内置 CUDA 12.9 运行库）。
+* HiveOS（基于 Ubuntu 22.04）、任意 glibc 2.34+ 的 Linux x86_64，或 **Windows 10/11 x64**（第 12 节）。
+* 约 6.5 GB 可用磁盘空间用于模型（各矿工共享，仅下载一次）。
+
+### 4. HiveOS 设置（分步说明）
+
+1. **Wallets**（钱包）→ 添加你的 CMFD 钱包（64 位十六进制字符）。
+2. **Flight Sheets**（飞行表）→ *Create Flight Sheet*：
+   * Coin：`CMFD`（或任意名称），Wallet：你的 CMFD 钱包。
+   * Pool：**Configure in miner**。
+   * Miner：**Custom** → **Setup Miner Config**：
+
+| 字段 | 值 |
+|---|---|
+| Miner name | `freeforgeminer` |
+| Installation URL | 最新版本压缩包的链接，例如 `https://github.com/pepsykolya/freeforgeminer/releases/download/vX.Y.Z/freeforgeminer-X.Y.Z.tar.gz` |
+| Hash algorithm | `forgematrix_v4` |
+| Wallet and worker template | `%WAL%.%WORKER_NAME%`（或 `YOUR_ADDRESS.rigname`） |
+| Pool URL | 第 5 节表格中完整的 `cmfd+tls://IP:PORT?pin=...` |
+| Pass | 留空 |
+| Extra config arguments | 留空，或填入第 6 节的 JSON |
+
+3. 将 Flight Sheet **应用（Apply）**到矿机。首次启动时，矿工会校验模型哈希（约 1 分钟，
+   或一次性下载 6.4 GB），然后为每块显卡启动一个进程。
+4. 在 HiveOS 中，每块显卡都会显示各自的算力、温度和已接受/被拒绝的份额。
+   在矿池上，整台矿机是**一个矿工名**（`rigname`）。
+
+> **更新：** 将 Installation URL 改为新版本即可。只有版本变化时 HiveOS 才会重新安装。
+
+### 5. 矿池
+
+矿工需要**数字 IPv4 地址、端口和证书指纹（pin）**（不接受域名）。
+pin 是矿池 TLS 证书的 SHA-256：矿工会拒绝连接任何其他服务器。
+
+| 矿池 | 费率 | 矿池 URL（复制整行） |
+|---|---|---|
+| **cmfd-pool.online**（社区矿池，PPLNS，满 10 CMFD 自动支付） | 3 % | `cmfd+tls://109.199.124.187:29465?pin=ebe88f5e05f3a222208d551d05b6d39057b64ce8239ba7a708d487e15ac711be` |
+| **Aria / AriaBrain** (pool.ariabrain.com/cmfd.html) | 3 %（其 API 中 `operator_fee_bps=300`） | `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9` |
+| **NurseryPool** (cmfd.nurserypool.com) | 1 % | `cmfd+tls://162.19.84.16:29445?pin=f61b1a26bebc257d95dad2e770ac15f229659ad85597f65c78293a3c1259c6a6` |
+
+pin 和费率于 2026-10-07 核实。你可以自行验证 pin：
+```bash
+openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl x509 -outform DER | sha256sum
+```
+
+**矿池封禁。** 在大量提交被拒份额后，cmfd-pool.online 会临时封禁**IP 地址**（约一小时）。
+同一 IP 下的所有矿机都会受影响。份额被拒几乎总是意味着超频不稳定（第 7 节）。
+
+### 6. 额外配置（可选 JSON）
+
+```json
+{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "batch":64, "model_dir":"/hive/miners/custom/cmfd-model"}
+```
+| 键 | 含义 |
+|---|---|
+| `gpus` | 仅在这些 GPU 编号上挖矿（默认：全部） |
+| `worker` | 矿池上的矿工名（默认：取自钱包模板或矿机名称） |
+| `per_gpu_workers` | `true` = 每块显卡在矿池上是独立的矿工 `rig.gpuN`；默认 `false` = 每台矿机一个矿工 |
+| `model_dir` | 6.4 GB 模型的存放位置（默认 `/hive/miners/custom/cmfd-model`，与其他 CMFD 矿工共享） |
+| `batch` | 每次 GPU 运行的前向计算数，1–64。省略 = 自动：11 GB 以上显卡为 64，8 GB 显卡为 32。在 RTX 4070 Ti 上实测：4→23.2，32→23.9，64→24.1 FW/s（GPU 时间）；在 RTX 3070 上差异在 1 % 以内 |
+
+### 7. 超频（RTX 30）
+
+Tensor Core 路径对 GPU 的负载远高于旧式矿工。在其他场景下稳定的参数，在这里可能导致 GPU
+**悄悄返回错误结果**——此时矿工找不到有效份额，或矿池拒绝这些份额。
+
+* 锁定核心频率并使用核心偏移，显存保持默认。建议从 **核心锁频 1560 MHz + 偏移 175** 开始
+  （每块 RTX 3070 约 150 W，约 14.6 FW/s）。只有在日志显示 `INTEGRITY | ok` 且
+  **没有** `SHARE REJECTED` 时，才以 25 为步长提高偏移。在我们的显卡上，+275 和 +225 在部分 GPU 上出现错误，+175 稳定。
+  每张卡都不一样：在 HiveOS 中可以为每张卡单独设置数值（`175 175 275 ...`）。
+* **矿工运行时切勿更改频率。** 先设置超频，再（重新）启动矿工。
+* **1.2.0 提示：** 融合内核对 GPU 的负载更密集。更新后请检查日志中是否有 `INTEGRITY | ok`，且没有被拒绝/无效的份额。如果某块大幅降压的显卡出现 `INTEGRITY ERROR` 或崩溃，请将其核心偏移降低 50。
+* 默认频率始终安全（每块 RTX 3070 约 16.5 FW/s，约 250 W）。
+
+### 8. 如何阅读日志
+
+| 日志行 | 含义 |
+|---|---|
+| `MINER STATS | GPU n ... hashrate X FW/s | accepted A | rejected R | stale S ...` | 每 5 秒输出一次各 GPU 状态 |
+| `INTEGRITY | ok` | 每第 128 个批次会用经典路径重新计算，结果一致 |
+| `INTEGRITY | ERROR ...` | **GPU 计算结果错误**——请降低该显卡的偏移/频率 |
+| `SHARE STALE` | 份额到达前区块已更换——无害，不计入被拒绝 |
+| `SHARE NOT CREDITED` | 矿池端的状况（例如 `backend_unavailable`）——不是 GPU 问题 |
+| `SHARE RETRY \| code=worker_busy` | 矿池正忙于处理同一矿工的另一个份额（每台矿机一个矿工）；份额会自动重发 |
+| `SHARE REJECTED | code=...` | 矿池拒绝了该份额；反复被拒 = GPU 不稳定 |
+| `DEV FEE | mining 36 s ...` / `DEV FEE | done` | 1 % 开发者抽水时间段 |
+
+HiveOS 日志：`/var/log/miner/freeforgeminer/miner.log`，其旁边每块 GPU 各有一个文件。
+
+### 9. 开发者抽水 — 1 %
+
+每块 GPU 每小时有 36 秒，矿工会在同一矿池中向
+`a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c` 挖矿（矿工名 `ffm-fee`）。
+每块 GPU 的时间段是随机的（一台矿机不会同时重连所有显卡）；如果矿池拒绝，则跳过该时段。
+代码：`patches/0003-*`。
+
+### 10. 故障排除
+
+| 现象 | 解决办法 |
+|---|---|
+| `GLIBC_2.xx not found` | 使用 1.0.1 或更新的版本（为 Ubuntu 22.04 编译） |
+| 1.2.0 或更早版本 CPU 占用/CPU 温度很高 | 更新到 1.2.1（将 Installation URL 改为新版本） |
+| HiveOS 提示 `Already installed` 且没有任何变化 | Installation URL 必须指向新版本 |
+| `worker temporarily banned` | 你的 IP 因被拒份额被矿池封禁：停止该 IP 下所有矿工约 1 小时，修正超频，先只启动一台矿机 |
+| `INTEGRITY | ERROR` 或大量 `SHARE REJECTED` | 降低该 GPU 的核心偏移，重启矿工 |
+| 模型下载失败 | 检查矿机的 DNS/网络；模型来自官方 Common Foundry CDN |
+| Windows：算力只有 0.5-2 FW/s，而不是约 20 | 6.4 GB 模型放不进可用显存，Windows 把一部分挪到了内存：请关闭占用 GPU 的程序（本地 AI 模型、游戏、浏览器硬件加速）；可用显存少于约 7000 MiB 时 `start.bat` 会发出警告 |
+| Windows：压缩包或 `.exe` 被 Defender / SmartScreen 拦截 | *更多信息 → 仍要运行*，或将矿工文件夹加入 Defender 排除项；请核对发布页面上的压缩包 SHA-256 |
+
+### 11. 不使用 HiveOS 的 Linux
+
+```bash
+tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
+./cmfd-miner pool --pool 'cmfd+tls://IP:PORT?pin=...' --miner YOUR_ADDRESS --worker rig01 --gpu 0 [--batch 32] \
+  --production-v4-bank /path/to/MODEL-V2.bank --production-v4-replay-worker "$PWD/cmfd-v4-replay" \
+  --production-v4-scratch /tmp/ffm-gpu0 --stats-seconds 5
+```
+每块 GPU 运行一个进程（`--gpu N`）。首次运行需要模型以及压缩包中的启动文件（`production-mainnet/`）。
+
+### 12. Windows 10/11
+
+原生 Windows 版本——无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动
+（已在驱动 572.70、RTX 4070 Laptop 上测试：约 20 FW/s，与 Linux 版本逐位一致）。
+
+1. 从发布页面下载 **`freeforgeminer-1.2.1-windows-x64.zip`**：
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.1/freeforgeminer-1.2.1-windows-x64.zip`
+2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForgeMiner`。
+3. 右键点击 **`start.bat`** → *编辑*，并设置：
+
+| 设置项 | 值 |
+|---|---|
+| `WALLET` | 你的 CMFD 地址（64 位十六进制字符） |
+| `POOL` | 第 5 节中一个完整的 `cmfd+tls://…` URL（默认：cmfd-pool.online） |
+| `WORKER` | 矿机名称，默认 = 计算机名 |
+| `GPUS` | 留空 = 所有 NVIDIA 显卡，或类似 `0,1` 的列表（编号来自 `nvidia-smi`） |
+| `BATCH` | 留空 = 自动，或 1-64 |
+| `PER_GPU_WORKERS` | `0` = 这台电脑在矿池上是一个矿工，`1` = 每块 GPU 一个矿工 |
+
+4. 双击 **`start.bat`**。首次启动会一次性下载 6.4 GB 模型（16 个并行分块，每个分块都经过
+   SHA-256 校验，视网速约 10-30 分钟）。之后启动只需重新校验（约 1 分钟）。
+5. 每块 GPU 运行一个矿工进程；它们的输出在同一窗口中显示为 `[GPU0] …`、`[GPU1] …`，并保存到
+   `logs\gpuN.log`。进程退出后会在 15 秒后自动重启。`Ctrl+C` 停止全部。
+
+* **显存：** 模型约占用 6.7 GB 显存。8 GB 显卡请关闭其他所有占用 GPU 的程序——如果放不下，Windows 会悄悄把一部分挪到系统内存，算力会降到约 0.5 FW/s。
+* **超频：** 使用 MSI Afterburner（通过曲线编辑器锁定核心频率 + 核心偏移，显存保持默认）；第 7 节的规则完全适用。笔记本：接上充电器并选择最高性能模式。
+* 开机自启：把 `start.bat` 的快捷方式放进 `shell:startup`。
+
+---
+
+### 更新日志
+
+* **1.2.1** - 矿工在等待 GPU 期间不再让每块 GPU 占满一个 CPU 核心 100 %（CUDA blocking sync）：在 CPU 较弱的矿机上（例如 4 核 i5 带 6–8 块 GPU），CPU 占用和温度大幅下降。算力和结果不变。
+* **1.2.0 Windows** - 1.2.0 的原生 Windows 10/11 x64 版本（无需 WSL）：`start.bat` 启动器、每块 GPU 一个进程、自动下载模型并自动重启。代码和结果与 Linux 版本相同。
+* **1.2.0** - 新的融合 GEMM+reduce GPU 内核（int8 tensor cores，层归约在寄存器中完成）：GPU 基准测试中 RTX 3070 14.9 -> 20.0 FW/s (+34 %)，RTX 4070 Ti 26.1 -> 32.4 FW/s (+24 %)；矿池上 4070 Ti 25.6 -> 30.5 FW/s。与参考实现逐位一致（已验证确定性和摘要），GPU 显存占用约减少 4 倍。适用于 RTX 30/40/50 (sm_80+)；更老的 GPU 使用之前的路径。`CMFD_FUSED=-1` 可恢复旧内核。
+* **1.1.1** - 日志横幅显示真实的发布版本号。
+* **1.1.0** - 持久化搜索缓冲区，并去掉对每层激活/预激活值的无用写入。RTX 4070 Ti：23.7 -> 25.7 FW/s (+9 %, ~185 W)；RTX 3070：14.56 -> 14.69 FW/s (+1 %)。逐位一致（已验证确定性和摘要），矿池上 0 被拒绝 / 0 无效。
+* **1.0.6** - 修正 batch 64 时的算力显示（12 GB 以上显卡）。
