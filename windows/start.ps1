@@ -8,7 +8,8 @@ param(
     [string]$Worker = $env:COMPUTERNAME,
     [string]$Gpus = '',
     [string]$Batch = '',
-    [string]$PerGpuWorkers = '0'
+    [string]$PerGpuWorkers = '0',
+    [string]$Mode = 'speed'
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -70,6 +71,8 @@ $bank = Join-Path $inputs 'MODEL-V2.bank'
 if (-not (Test-Path -LiteralPath $bank)) { Fail 'Model preparation did not produce inputs\MODEL-V2.bank.' }
 
 $env:FFM_SINGLE_WORKER = if ($PerGpuWorkers -eq '1') { '0' } else { '1' }
+if ($Mode -notin 'speed', 'eco') { Fail 'MODE must be speed or eco.' }
+$env:CMFD_MODE = $Mode  # the GPU worker picks its tile configuration per card from this
 $logs = Join-Path $root 'logs'
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
 
