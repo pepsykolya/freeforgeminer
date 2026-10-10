@@ -1,0 +1,27 @@
+From 7f484117f1acefb8987377437845bad3bc9b2c16 Mon Sep 17 00:00:00 2001
+From: pepsykolya <pepsykolya@gmail.com>
+Date: Sat, 10 Oct 2026 14:14:43 +0300
+Subject: [PATCH] FreeForgeMiner 1.2.2: keep the miner build identifier on all
+ linkers
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ crates/cmfd-miner/src/main.rs | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
+index d29534e..524c962 100644
+--- a/crates/cmfd-miner/src/main.rs
++++ b/crates/cmfd-miner/src/main.rs
+@@ -614,6 +614,8 @@ struct WorkerThreadError {
+ }
+ 
+ fn main() -> Result<()> {
++    // keep the layout identifier in the binary on every linker (MSVC drops unreferenced statics)
++    std::hint::black_box(SESSION_LAYOUT_ID.as_ptr());
+     let command = Cli::parse().command;
+     #[cfg(feature = "production-v4")]
+     if matches!(&command, Command::MainnetLaunchInfo) {
+-- 
+2.43.0
+

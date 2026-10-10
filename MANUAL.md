@@ -98,6 +98,7 @@ All rigs behind the same IP are affected. Rejected shares almost always mean an 
 | `worker` | worker name on the pool (default: from the wallet template or the rig name) |
 | `per_gpu_workers` | `true` = each card is a separate worker `rig.gpuN` on the pool; default `false` = one worker per rig |
 | `model_dir` | where the 6.4 GB model lives (default `/hive/miners/custom/cmfd-model`, shared with other CMFD miners) |
+| `mode` | `"speed"` (default) or `"eco"`. The GPU worker picks its kernel tile configuration per card automatically; `eco` trades ~6 % hashrate for ~14 % less power. Measured on RTX 3070 (core lock 1560, +175, memory stock, pool): speed 19.6 FW/s @ 166 W, eco 18.3 FW/s @ 143 W (11.8 vs 12.8 FW/s per 100 W). On RTX 40/50 `eco` is not measured separately |
 | `batch` | forwards per GPU pass, 1–64. Omit = automatic: 64 on 11 GB+ cards, 32 on 8 GB cards. Measured on RTX 4070 Ti: 4→23.2, 32→23.9, 64→24.1 FW/s (GPU time); on RTX 3070 the difference is within 1 % |
 
 ### 7. Overclocking (RTX 30)
@@ -111,6 +112,16 @@ The Tensor Core path loads the GPU much harder than older miners. A profile that
   Each card is different: in HiveOS you can set a value per card (`175 175 275 ...`).
 * **Never change clocks while the miner is running.** Set OC, then (re)start the miner.
 * **1.2.0 note:** the fused kernel loads the GPU more densely. After updating, check the log for `INTEGRITY | ok` and no rejected/invalid shares. If a heavily undervolted card shows `INTEGRITY ERROR` or crashes, lower its core offset by 50.
+* **1.2.2, RTX 3070** (core lock 1560 MHz, offset +175, memory stock, pool mining on Aria, 8-minute windows):
+
+  | Version / mode | FW/s | Power | FW/s per 100 W |
+  |---|---|---|---|
+  | 1.2.1 | 19.8 | 172 W | 11.5 |
+  | 1.2.2 `speed` (default) | 19.6 | 166 W | 11.8 |
+  | 1.2.2 `eco` | 18.3 | 143 W | 12.8 |
+
+* **Do NOT lock the memory clock low for CMFD:** with memory at 810 MHz (a common Pearl/NOID profile) any CMFD miner drops to ~3.5 FW/s on an RTX 3070 — CMFD needs memory at stock.
+* **A core offset that is stable for other coins can be unstable for CMFD:** on one of our RTX 3070 +225 produced wrong results (`INTEGRITY ERROR`) while +175 was stable.
 * Stock clocks are always safe (~16.5 FW/s, ~250 W per RTX 3070).
 
 ### 8. Reading the log
@@ -163,19 +174,20 @@ Run one process per GPU (`--gpu N`). The first run needs the model and the launc
 Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed
 (tested on driver 572.70, RTX 4070 Laptop: ~20 FW/s, bit-exact with the Linux build).
 
-1. Download **`freeforgeminer-1.2.1-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.1/freeforgeminer-1.2.1-windows-x64.zip`
+1. Download **`freeforgeminer-1.2.2-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.2/freeforgeminer-1.2.2-windows-x64.zip`
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForgeMiner`.
 3. Right-click **`start.bat`** → *Edit* and set:
 
 | Setting | Value |
 |---|---|
 | `WALLET` | your CMFD address (64 hex characters) |
-| `POOL` | one full `cmfd+tls://…` URL from section 5 (default: cmfd-pool.online) |
+| `POOL` | one full `cmfd+tls://…` URL from section 5 (default: Aria / AriaBrain) |
 | `WORKER` | rig name, default = computer name |
 | `GPUS` | empty = all NVIDIA GPUs, or a list like `0,1` (indexes from `nvidia-smi`) |
 | `BATCH` | empty = automatic, or 1-64 |
 | `PER_GPU_WORKERS` | `0` = the PC is one worker on the pool, `1` = one worker per GPU |
+| `MODE` | `speed` = maximum hashrate (default), `eco` = fewer watts (RTX 30: about -14 % power, -6 % hashrate) |
 
 4. Double-click **`start.bat`**. The first start downloads the 6.4 GB model once (16 parallel parts, every part
    SHA-256-verified, ~10-30 min depending on the connection). Later starts only re-check it (~1 min).
@@ -192,6 +204,7 @@ Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDI
 
 ### Changelog
 
+* **1.2.2** - the GPU worker picks its kernel tile configuration automatically per GPU from the L2 cache size: RTX 30 (small L2) get a better rasterization (`speed`, default) or 128x256 tiles (`eco`); RTX 40/50 keep the RTX 4070 Ti configuration. New `mode` (`speed`|`eco`; env `CMFD_MODE`, Extra config `"mode"`, `MODE` in Windows `start.bat`). RTX 3070: 1.2.1 19.8 FW/s @ 172 W; 1.2.2 speed 19.6 FW/s @ 166 W; eco 18.3 FW/s @ 143 W. Output bit-identical to the reference. Windows `start.bat`: default pool is now Aria. `CMFD_FUSED=<n>` still overrides the choice. Log line: `fused_config=N mode=... l2_mb=...`.
 * **1.2.1** - the miner no longer keeps one CPU core at 100 % per GPU while waiting for the GPU (CUDA blocking sync): on rigs with small CPUs (e.g. 4-core i5 with 6–8 GPUs) CPU load and temperature drop sharply. Hashrate and results unchanged.
 * **1.2.0 Windows** - native Windows 10/11 x64 build of 1.2.0 (no WSL): `start.bat` launcher, one process per GPU, automatic model download and restart. Same code and results as the Linux build.
 * **1.2.0** - new fused GEMM+reduce GPU kernel (int8 tensor cores, layer reduce in registers): RTX 3070 14.9 -> 20.0 FW/s (+34 %), RTX 4070 Ti 26.1 -> 32.4 FW/s (+24 %) in the GPU benchmark; on the pool 4070 Ti 25.6 -> 30.5 FW/s. Bit-exact with the reference (determinism and digest checks), uses ~4x less GPU memory. Works on RTX 30/40/50 (sm_80+); older GPUs use the previous path. `CMFD_FUSED=-1` restores the old kernel.
@@ -290,6 +303,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 | `worker` | имя воркера на пуле (по умолчанию — из шаблона кошелька или имя рига) |
 | `per_gpu_workers` | `true` — каждая карта отдельным воркером `rig.gpuN` на пуле; по умолчанию `false` — один воркер на риг |
 | `model_dir` | где лежит модель 6,4 ГБ (по умолчанию `/hive/miners/custom/cmfd-model`, общая с другими CMFD-майнерами) |
+| `mode` | `"speed"` (по умолчанию) или `"eco"`. Воркер сам выбирает конфигурацию тайлов ядра под каждую карту; `eco` меняет ~6 % хешрейта на ~14 % меньше мощности. Замер на RTX 3070 (фиксация 1560, +175, память сток, пул): speed 19,6 FW/s @ 166 Вт, eco 18,3 FW/s @ 143 Вт (11,8 против 12,8 FW/s на 100 Вт). На RTX 40/50 `eco` отдельно не измерялся |
 | `batch` | проходов на карту за раз, 1–64. Не указан — автоматически: 64 для карт от 11 ГБ, 32 для 8 ГБ. Замер на RTX 4070 Ti: 4→23,2, 32→23,9, 64→24,1 FW/s (время GPU); на RTX 3070 разница в пределах 1 % |
 
 ### 7. Разгон (RTX 30)
@@ -303,6 +317,16 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
   Каждая карта своя: в HiveOS можно задать значение для каждой карты (`175 175 275 ...`).
 * **Не меняйте частоты при работающем майнере.** Сначала разгон, потом (пере)запуск майнера.
 * **Заметка к 1.2.0:** новое ядро нагружает карту плотнее. После обновления проверьте в логе `INTEGRITY | ok` и отсутствие rejected/invalid шар. Если сильно андервольтнутая карта показывает `INTEGRITY ERROR` или падает, уменьшите смещение ядра на 50.
+* **1.2.2, RTX 3070** (фиксация ядра 1560 МГц, смещение +175, память сток, майнинг на пуле Aria, окна по 8 минут):
+
+  | Версия / режим | FW/s | Мощность | FW/s на 100 Вт |
+  |---|---|---|---|
+  | 1.2.1 | 19,8 | 172 Вт | 11,5 |
+  | 1.2.2 `speed` (по умолчанию) | 19,6 | 166 Вт | 11,8 |
+  | 1.2.2 `eco` | 18,3 | 143 Вт | 12,8 |
+
+* **НЕ занижайте частоту памяти для CMFD:** при памяти 810 МГц (частый профиль Pearl/NOID) любой CMFD-майнер на RTX 3070 падает до ~3,5 FW/s — CMFD нужна память на стоке.
+* **Смещение ядра, стабильное для других монет, может быть нестабильным для CMFD:** на одной из наших RTX 3070 +225 давало неверные результаты (`INTEGRITY ERROR`), а +175 было стабильным.
 * Сток безопасен всегда (~16,5 FW/s, ~250 Вт на RTX 3070).
 
 ### 8. Как читать лог
@@ -355,19 +379,20 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 Нативная сборка под Windows — без WSL, без установки CUDA и Python. Нужен только драйвер NVIDIA
 (проверено на драйвере 572.70, RTX 4070 Laptop: ~20 FW/s, результат побитово как у Linux-сборки).
 
-1. Скачайте **`freeforgeminer-1.2.1-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.1/freeforgeminer-1.2.1-windows-x64.zip`
+1. Скачайте **`freeforgeminer-1.2.2-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.2/freeforgeminer-1.2.2-windows-x64.zip`
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForgeMiner`.
 3. Правой кнопкой по **`start.bat`** → *Изменить* и задайте:
 
 | Параметр | Значение |
 |---|---|
 | `WALLET` | ваш CMFD-адрес (64 шестнадцатеричных символа) |
-| `POOL` | одна строка `cmfd+tls://…` целиком из раздела 5 (по умолчанию cmfd-pool.online) |
+| `POOL` | одна строка `cmfd+tls://…` целиком из раздела 5 (по умолчанию Aria / AriaBrain) |
 | `WORKER` | имя рига, по умолчанию — имя компьютера |
 | `GPUS` | пусто = все карты NVIDIA, или список вида `0,1` (номера из `nvidia-smi`) |
 | `BATCH` | пусто = автоматически, или 1–64 |
 | `PER_GPU_WORKERS` | `0` = весь ПК один воркер на пуле, `1` = отдельный воркер на каждую карту |
+| `MODE` | `speed` = максимальный хешрейт (по умолчанию), `eco` = меньше ватт (RTX 30: около -14 % мощности, -6 % хешрейта) |
 
 4. Запустите **`start.bat`** двойным щелчком. При первом запуске модель 6,4 ГБ скачивается один раз (16 частей
    параллельно, каждая проверяется по SHA-256, ~10–30 минут в зависимости от интернета). Дальше при запуске она только
@@ -383,6 +408,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 
 ### Список изменений
 
+* **1.2.2** - GPU-воркер сам выбирает конфигурацию тайлов ядра под каждую карту по размеру кэша L2: RTX 30 (малый L2) получают лучшую растеризацию (`speed`, по умолчанию) или тайлы 128x256 (`eco`); RTX 40/50 сохраняют конфигурацию RTX 4070 Ti. Новый параметр `mode` (`speed`|`eco`; переменная `CMFD_MODE`, Extra config `"mode"`, `MODE` в Windows `start.bat`). RTX 3070: 1.2.1 19,8 FW/s @ 172 Вт; 1.2.2 speed 19,6 FW/s @ 166 Вт; eco 18,3 FW/s @ 143 Вт. Результат побитово совпадает с эталоном. Windows `start.bat`: пул по умолчанию теперь Aria. `CMFD_FUSED=<n>` по-прежнему переопределяет выбор. Строка в логе: `fused_config=N mode=... l2_mb=...`.
 * **1.2.1** - майнер больше не держит по ядру процессора на 100 % на каждую видеокарту, пока ждёт GPU (блокирующее ожидание CUDA): на ригах со слабым процессором (например, 4-ядерный i5 и 6–8 карт) нагрузка и температура CPU резко падают. Хешрейт и результаты не меняются.
 * **1.2.0 Windows** - нативная сборка 1.2.0 под Windows 10/11 x64 (без WSL): запуск через `start.bat`, процесс на каждую карту, автоматическая загрузка модели и перезапуск. Код и результаты те же, что у Linux-сборки.
 * **1.2.0** - новое объединённое ядро GEMM+reduce (int8 тензорные ядра, свёртка слоя в регистрах): RTX 3070 14,9 -> 20,0 FW/s (+34 %), RTX 4070 Ti 26,1 -> 32,4 FW/s (+24 %) в тесте GPU; на пуле 4070 Ti 25,6 -> 30,5 FW/s. Побитово совпадает с эталоном (проверки детерминизма и дайджеста), памяти GPU нужно примерно в 4 раза меньше. Работает на RTX 30/40/50 (sm_80+); старые карты идут по прежнему пути. `CMFD_FUSED=-1` возвращает старое ядро.
@@ -483,6 +509,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 | `worker` | 矿池上的矿工名（默认：取自钱包模板或矿机名称） |
 | `per_gpu_workers` | `true` = 每块显卡在矿池上是独立的矿工 `rig.gpuN`；默认 `false` = 每台矿机一个矿工 |
 | `model_dir` | 6.4 GB 模型的存放位置（默认 `/hive/miners/custom/cmfd-model`，与其他 CMFD 矿工共享） |
+| `mode` | `"speed"`（默认）或 `"eco"`。GPU 工作进程会按显卡自动选择内核分块配置；`eco` 用约 6 % 的算力换取约 14 % 的功耗下降。RTX 3070 实测（核心锁频 1560，+175，显存默认，矿池）：speed 19.6 FW/s @ 166 W，eco 18.3 FW/s @ 143 W（每 100 W 11.8 对 12.8 FW/s）。RTX 40/50 上 `eco` 未单独测量 |
 | `batch` | 每次 GPU 运行的前向计算数，1–64。省略 = 自动：11 GB 以上显卡为 64，8 GB 显卡为 32。在 RTX 4070 Ti 上实测：4→23.2，32→23.9，64→24.1 FW/s（GPU 时间）；在 RTX 3070 上差异在 1 % 以内 |
 
 ### 7. 超频（RTX 30）
@@ -496,6 +523,16 @@ Tensor Core 路径对 GPU 的负载远高于旧式矿工。在其他场景下稳
   每张卡都不一样：在 HiveOS 中可以为每张卡单独设置数值（`175 175 275 ...`）。
 * **矿工运行时切勿更改频率。** 先设置超频，再（重新）启动矿工。
 * **1.2.0 提示：** 融合内核对 GPU 的负载更密集。更新后请检查日志中是否有 `INTEGRITY | ok`，且没有被拒绝/无效的份额。如果某块大幅降压的显卡出现 `INTEGRITY ERROR` 或崩溃，请将其核心偏移降低 50。
+* **1.2.2，RTX 3070**（核心锁频 1560 MHz，偏移 +175，显存默认，在 Aria 矿池挖矿，每次 8 分钟窗口）：
+
+  | 版本 / 模式 | FW/s | 功耗 | 每 100 W 的 FW/s |
+  |---|---|---|---|
+  | 1.2.1 | 19.8 | 172 W | 11.5 |
+  | 1.2.2 `speed`（默认） | 19.6 | 166 W | 11.8 |
+  | 1.2.2 `eco` | 18.3 | 143 W | 12.8 |
+
+* **不要为 CMFD 锁低显存频率：** 显存 810 MHz（常见的 Pearl/NOID 配置）时，任何 CMFD 矿工在 RTX 3070 上都会降到约 3.5 FW/s —— CMFD 需要默认显存频率。
+* **对其他币稳定的核心偏移，对 CMFD 可能不稳定：** 在我们的一块 RTX 3070 上，+225 产生了错误结果（`INTEGRITY ERROR`），而 +175 是稳定的。
 * 默认频率始终安全（每块 RTX 3070 约 16.5 FW/s，约 250 W）。
 
 ### 8. 如何阅读日志
@@ -548,19 +585,20 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 原生 Windows 版本——无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动
 （已在驱动 572.70、RTX 4070 Laptop 上测试：约 20 FW/s，与 Linux 版本逐位一致）。
 
-1. 从发布页面下载 **`freeforgeminer-1.2.1-windows-x64.zip`**：
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.1/freeforgeminer-1.2.1-windows-x64.zip`
+1. 从发布页面下载 **`freeforgeminer-1.2.2-windows-x64.zip`**：
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.2/freeforgeminer-1.2.2-windows-x64.zip`
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForgeMiner`。
 3. 右键点击 **`start.bat`** → *编辑*，并设置：
 
 | 设置项 | 值 |
 |---|---|
 | `WALLET` | 你的 CMFD 地址（64 位十六进制字符） |
-| `POOL` | 第 5 节中一个完整的 `cmfd+tls://…` URL（默认：cmfd-pool.online） |
+| `POOL` | 第 5 节中一个完整的 `cmfd+tls://…` URL（默认：Aria / AriaBrain） |
 | `WORKER` | 矿机名称，默认 = 计算机名 |
 | `GPUS` | 留空 = 所有 NVIDIA 显卡，或类似 `0,1` 的列表（编号来自 `nvidia-smi`） |
 | `BATCH` | 留空 = 自动，或 1-64 |
 | `PER_GPU_WORKERS` | `0` = 这台电脑在矿池上是一个矿工，`1` = 每块 GPU 一个矿工 |
+| `MODE` | `speed` = 最高算力（默认），`eco` = 更低功耗（RTX 30：功耗约 -14 %，算力约 -6 %） |
 
 4. 双击 **`start.bat`**。首次启动会一次性下载 6.4 GB 模型（16 个并行分块，每个分块都经过
    SHA-256 校验，视网速约 10-30 分钟）。之后启动只需重新校验（约 1 分钟）。
@@ -575,6 +613,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 
 ### 更新日志
 
+* **1.2.2** - GPU 工作进程根据 L2 缓存大小为每块 GPU 自动选择内核分块配置：RTX 30（L2 较小）使用更优的栅格化（`speed`，默认）或 128x256 分块（`eco`）；RTX 40/50 保持 RTX 4070 Ti 的配置。新增 `mode`（`speed`|`eco`；环境变量 `CMFD_MODE`，Extra config 中的 `"mode"`，Windows `start.bat` 中的 `MODE`）。RTX 3070：1.2.1 为 19.8 FW/s @ 172 W；1.2.2 speed 为 19.6 FW/s @ 166 W；eco 为 18.3 FW/s @ 143 W。输出与参考实现逐位一致。Windows `start.bat`：默认矿池改为 Aria。`CMFD_FUSED=<n>` 仍可覆盖该选择。日志行：`fused_config=N mode=... l2_mb=...`。
 * **1.2.1** - 矿工在等待 GPU 期间不再让每块 GPU 占满一个 CPU 核心 100 %（CUDA blocking sync）：在 CPU 较弱的矿机上（例如 4 核 i5 带 6–8 块 GPU），CPU 占用和温度大幅下降。算力和结果不变。
 * **1.2.0 Windows** - 1.2.0 的原生 Windows 10/11 x64 版本（无需 WSL）：`start.bat` 启动器、每块 GPU 一个进程、自动下载模型并自动重启。代码和结果与 Linux 版本相同。
 * **1.2.0** - 新的融合 GEMM+reduce GPU 内核（int8 tensor cores，层归约在寄存器中完成）：GPU 基准测试中 RTX 3070 14.9 -> 20.0 FW/s (+34 %)，RTX 4070 Ti 26.1 -> 32.4 FW/s (+24 %)；矿池上 4070 Ti 25.6 -> 30.5 FW/s。与参考实现逐位一致（已验证确定性和摘要），GPU 显存占用约减少 4 倍。适用于 RTX 30/40/50 (sm_80+)；更老的 GPU 使用之前的路径。`CMFD_FUSED=-1` 可恢复旧内核。
