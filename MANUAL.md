@@ -139,6 +139,7 @@ Code: `patches/0003-*`.
 | Symptom | Fix |
 |---|---|
 | `GLIBC_2.xx not found` | use release 1.0.1 or newer (built for Ubuntu 22.04) |
+| High CPU load / CPU temperature with 1.2.0 or older | update to 1.2.1 (Installation URL with the new version) |
 | HiveOS says `Already installed` and nothing changes | the Installation URL must point to a new version |
 | `worker temporarily banned` | your IP is banned by the pool for rejected shares: stop all miners on that IP for ~1 hour, fix OC, start one rig first |
 | `INTEGRITY | ERROR` or many `SHARE REJECTED` | lower the core offset of that GPU, restart the miner |
@@ -161,8 +162,8 @@ Run one process per GPU (`--gpu N`). The first run needs the model and the launc
 Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed
 (tested on driver 572.70, RTX 4070 Laptop: ~20 FW/s, bit-exact with the Linux build).
 
-1. Download **`freeforgeminer-1.2.0-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.0/freeforgeminer-1.2.0-windows-x64.zip`
+1. Download **`freeforgeminer-1.2.1-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.1/freeforgeminer-1.2.1-windows-x64.zip`
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForgeMiner`.
 3. Right-click **`start.bat`** → *Edit* and set:
 
@@ -190,6 +191,7 @@ Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDI
 
 ### Changelog
 
+* **1.2.1** - the miner no longer keeps one CPU core at 100 % per GPU while waiting for the GPU (CUDA blocking sync): on rigs with small CPUs (e.g. 4-core i5 with 6–8 GPUs) CPU load and temperature drop sharply. Hashrate and results unchanged.
 * **1.2.0 Windows** - native Windows 10/11 x64 build of 1.2.0 (no WSL): `start.bat` launcher, one process per GPU, automatic model download and restart. Same code and results as the Linux build.
 * **1.2.0** - new fused GEMM+reduce GPU kernel (int8 tensor cores, layer reduce in registers): RTX 3070 14.9 -> 20.0 FW/s (+34 %), RTX 4070 Ti 26.1 -> 32.4 FW/s (+24 %) in the GPU benchmark; on the pool 4070 Ti 25.6 -> 30.5 FW/s. Bit-exact with the reference (determinism and digest checks), uses ~4x less GPU memory. Works on RTX 30/40/50 (sm_80+); older GPUs use the previous path. `CMFD_FUSED=-1` restores the old kernel.
 * **1.1.1** - log banner shows the real release version.
@@ -328,6 +330,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 | Симптом | Решение |
 |---|---|
 | `GLIBC_2.xx not found` | используйте релиз 1.0.1 или новее (собран под Ubuntu 22.04) |
+| Высокая загрузка / температура CPU на 1.2.0 и старше | обновитесь до 1.2.1 (Installation URL с новой версией) |
 | HiveOS пишет `Already installed`, ничего не меняется | в Installation URL должна быть новая версия |
 | `worker temporarily banned` | ваш IP забанен пулом за отклонённые шары: остановите все майнеры за этим IP примерно на час, исправьте разгон, запускайте сначала один риг |
 | `INTEGRITY | ERROR` или много `SHARE REJECTED` | снизьте смещение этой карте, перезапустите майнер |
@@ -350,8 +353,8 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 Нативная сборка под Windows — без WSL, без установки CUDA и Python. Нужен только драйвер NVIDIA
 (проверено на драйвере 572.70, RTX 4070 Laptop: ~20 FW/s, результат побитово как у Linux-сборки).
 
-1. Скачайте **`freeforgeminer-1.2.0-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.0/freeforgeminer-1.2.0-windows-x64.zip`
+1. Скачайте **`freeforgeminer-1.2.1-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.1/freeforgeminer-1.2.1-windows-x64.zip`
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForgeMiner`.
 3. Правой кнопкой по **`start.bat`** → *Изменить* и задайте:
 
@@ -378,6 +381,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 
 ### Список изменений
 
+* **1.2.1** - майнер больше не держит по ядру процессора на 100 % на каждую видеокарту, пока ждёт GPU (блокирующее ожидание CUDA): на ригах со слабым процессором (например, 4-ядерный i5 и 6–8 карт) нагрузка и температура CPU резко падают. Хешрейт и результаты не меняются.
 * **1.2.0 Windows** - нативная сборка 1.2.0 под Windows 10/11 x64 (без WSL): запуск через `start.bat`, процесс на каждую карту, автоматическая загрузка модели и перезапуск. Код и результаты те же, что у Linux-сборки.
 * **1.2.0** - новое объединённое ядро GEMM+reduce (int8 тензорные ядра, свёртка слоя в регистрах): RTX 3070 14,9 -> 20,0 FW/s (+34 %), RTX 4070 Ti 26,1 -> 32,4 FW/s (+24 %) в тесте GPU; на пуле 4070 Ti 25,6 -> 30,5 FW/s. Побитово совпадает с эталоном (проверки детерминизма и дайджеста), памяти GPU нужно примерно в 4 раза меньше. Работает на RTX 30/40/50 (sm_80+); старые карты идут по прежнему пути. `CMFD_FUSED=-1` возвращает старое ядро.
 * **1.1.1** - баннер в логе показывает реальную версию релиза.

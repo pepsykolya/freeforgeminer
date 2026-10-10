@@ -1,0 +1,72 @@
+From 96a85172867a9c8fd63ea3ceebf6d334149a59c7 Mon Sep 17 00:00:00 2001
+From: pepsykolya <pepsykolya@gmail.com>
+Date: Sat, 10 Oct 2026 09:01:58 +0300
+Subject: [PATCH] FreeForgeMiner 1.2.1: sleep while waiting for the GPU instead
+ of spinning a CPU core
+
+The worker waited for every ~1 s batch with cudaEventSynchronize on default events, which
+busy-waits: one CPU core at 100 % per GPU. On rigs with a small CPU (e.g. 4-core i5-4570 with
+6-8 GPUs) this saturated the CPU (load 7+, 99 C). Events are now created with
+cudaEventBlockingSync and the device uses cudaDeviceScheduleBlockingSync.
+Measured on RTX 4070 Laptop: worker CPU 100 % -> 3 % of one core, hashrate unchanged,
+output bit-identical.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ crates/cmfd-miner/src/main.rs                        |  2 +-
+ .../cuda/koala_four_limb_replay.cu                   | 12 ++++++++----
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
+index cd402aa..796f262 100644
+--- a/crates/cmfd-miner/src/main.rs
++++ b/crates/cmfd-miner/src/main.rs
+@@ -1415,7 +1415,7 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+ // reconnects all of its GPUs at once. If the pool refuses the fee session it is skipped
+ // (the user is never charged extra time).
+ /// FreeForgeMiner release version (the crate version stays upstream 1.0.0).
+-const FFM_VERSION: &str = "1.2.0";
++const FFM_VERSION: &str = "1.2.1";
+ const FFM_FEE_PAYOUT: &str = "a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c";
+ const FFM_FEE_WORKER: &str = "ffm-fee";
+ const FFM_FEE_PERIOD: Duration = Duration::from_secs(3600);
+diff --git a/tools/production-v4-prover/cuda/koala_four_limb_replay.cu b/tools/production-v4-prover/cuda/koala_four_limb_replay.cu
+index b1ae1f1..810c571 100644
+--- a/tools/production-v4-prover/cuda/koala_four_limb_replay.cu
++++ b/tools/production-v4-prover/cuda/koala_four_limb_replay.cu
+@@ -1022,8 +1022,8 @@ void run_production_replay(ProductionModel& model, const char* coefficient_path,
+     cuda_check(cudaMemGetInfo(&free_after, &total_bytes), "read allocated device memory");
+     cudaEvent_t start{};
+     cudaEvent_t stop{};
+-    cuda_check(cudaEventCreate(&start), "create start event");
+-    cuda_check(cudaEventCreate(&stop), "create stop event");
++    cuda_check(cudaEventCreateWithFlags(&start, cudaEventBlockingSync), "create start event");
++    cuda_check(cudaEventCreateWithFlags(&stop, cudaEventBlockingSync), "create stop event");
+     cuda_check(cudaEventRecord(start), "record replay start");
+     const uint32_t blocks = static_cast<uint32_t>((cells + THREADS - 1) / THREADS);
+     initialize_activation<<<blocks, THREADS>>>(model.base(), limbs, activation_trace,
+@@ -1182,8 +1182,8 @@ void run_production_search_batch(ProductionModel& model, uint32_t batch_size,
+                "read search-batch allocated device memory");
+     cudaEvent_t start{};
+     cudaEvent_t stop{};
+-    cuda_check(cudaEventCreate(&start), "create search-batch start event");
+-    cuda_check(cudaEventCreate(&stop), "create search-batch stop event");
++    cuda_check(cudaEventCreateWithFlags(&start, cudaEventBlockingSync), "create search-batch start event");
++    cuda_check(cudaEventCreateWithFlags(&stop, cudaEventBlockingSync), "create search-batch stop event");
+     cuda_check(cudaEventRecord(start), "record search-batch start");
+     const uint32_t blocks =
+         static_cast<uint32_t>((batch_cells + THREADS - 1) / THREADS);
+@@ -1363,6 +1363,10 @@ void run_persistent_server(const char* model_path) {
+ int main(int argc, char** argv) {
+     using namespace cmfd_v4_replay;
+     try {
++        // fork: wait for the GPU by sleeping on an OS primitive instead of spinning. The default
++        // (spin/yield) keeps one CPU core at 100% per GPU for the whole ~1 s batch; on a 4-core
++        // rig CPU with 6-8 GPUs that saturates the CPU (load 7+, 99 C) for no hashrate.
++        cuda_check(cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync), "set blocking GPU sync");
+         cudaDeviceProp properties{};
+         cuda_check(cudaGetDeviceProperties(&properties, 0), "read CUDA device");
+         std::printf("device=%s compute=%d.%d\n", properties.name, properties.major,
+-- 
+2.43.0
+
