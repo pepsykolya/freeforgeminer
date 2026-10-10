@@ -105,7 +105,7 @@ The Tensor Core path loads the GPU much harder than older miners. A profile that
 **return wrong results silently** — the miner then finds no valid shares or the pool rejects them.
 
 * Lock the core clock and use a core offset, memory stock. Start with **core lock 1560 MHz + offset 175**
-  (~150 W per RTX 3070, ~14.6 FW/s). Raise the offset in steps of 25 only while the log shows `INTEGRITY | ok`
+  (RTX 3070: ~20 FW/s with 1.2.x; was ~14.6 FW/s with 1.1). Raise the offset in steps of 25 only while the log shows `INTEGRITY | ok`
   and **no** `SHARE REJECTED`. On our cards +275 and +225 caused errors on some GPUs, +175 was stable.
   Each card is different: in HiveOS you can set a value per card (`175 175 275 ...`).
 * **Never change clocks while the miner is running.** Set OC, then (re)start the miner.
@@ -296,7 +296,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 карту **молча считать неправильно** — тогда майнер не находит верных шар или пул их отклоняет.
 
 * Фиксация частоты ядра + смещение, память — сток. Начинайте с **фиксации 1560 МГц и смещения +175**
-  (~150 Вт на RTX 3070, ~14,6 FW/s). Повышайте смещение шагами по 25, только пока в логе `INTEGRITY | ok`
+  (RTX 3070: ~20 FW/s на 1.2.x; на 1.1 было ~14,6 FW/s). Повышайте смещение шагами по 25, только пока в логе `INTEGRITY | ok`
   и **нет** `SHARE REJECTED`. На наших картах +275 и +225 давали ошибки на части GPU, +175 — стабильно.
   Каждая карта своя: в HiveOS можно задать значение для каждой карты (`175 175 275 ...`).
 * **Не меняйте частоты при работающем майнере.** Сначала разгон, потом (пере)запуск майнера.
@@ -488,7 +488,7 @@ Tensor Core 路径对 GPU 的负载远高于旧式矿工。在其他场景下稳
 **悄悄返回错误结果**——此时矿工找不到有效份额，或矿池拒绝这些份额。
 
 * 锁定核心频率并使用核心偏移，显存保持默认。建议从 **核心锁频 1560 MHz + 偏移 175** 开始
-  （每块 RTX 3070 约 150 W，约 14.6 FW/s）。只有在日志显示 `INTEGRITY | ok` 且
+  （RTX 3070：1.2.x 约 20 FW/s；1.1 时约 14.6 FW/s）。只有在日志显示 `INTEGRITY | ok` 且
   **没有** `SHARE REJECTED` 时，才以 25 为步长提高偏移。在我们的显卡上，+275 和 +225 在部分 GPU 上出现错误，+175 稳定。
   每张卡都不一样：在 HiveOS 中可以为每张卡单独设置数值（`175 175 275 ...`）。
 * **矿工运行时切勿更改频率。** 先设置超频，再（重新）启动矿工。
