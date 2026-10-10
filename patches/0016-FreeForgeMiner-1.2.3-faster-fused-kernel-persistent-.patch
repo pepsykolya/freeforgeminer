@@ -1,0 +1,775 @@
+From 04ccf5e15b9159ff5959f89a0ec5af65e5a9831f Mon Sep 17 00:00:00 2001
+From: Shahtyor <pepsykolya@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 02:45:08 +0300
+Subject: [PATCH 16/17] FreeForgeMiner 1.2.3: faster fused kernel, persistent
+ eco kernel (cfg 13)
+
+Strength-reduced main loop (per-thread offsets once, ldmatrix k-steps by XOR, cp.async shared
+offsets as immediates, column-outer MMA order); epilogue in the K domain (limb weights
+K 2^(8j) mod p with K^3 = R^5: one Montgomery reduction and two products give the canonical
+cube; signed mad.wide; per-tile column/row term tables; transposed limb stores through shared
+memory). Persistent 128x256 BK128 kernel (cfg 13) with per-layer atomic tile tickets, next-tile
+prefetch during the epilogue and alternating K direction. Defaults: RTX 30 (small L2) speed =
+cfg 0, eco = cfg 13; RTX 40/50 (large L2) cfg 13 in both modes. Output bit-identical to the
+reference on sm_86 and sm_89.
+RTX 3070 1560 MHz +175: cfg0 20.69 FW/s @178 W, cfg13 20.10 @155 W (1.2.2: 19.92 @184, 18.65 @159).
+RTX 4070 Ti 2100 MHz +150 190 W: cfg13 34.80 FW/s @178 W (1.2.2 default 30.62 @190 W).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../cuda/fused_limb_layer.cuh                 | 619 ++++++++++++------
+ 1 file changed, 409 insertions(+), 210 deletions(-)
+
+diff --git a/tools/production-v4-prover/cuda/fused_limb_layer.cuh b/tools/production-v4-prover/cuda/fused_limb_layer.cuh
+index fcf5782..5990fe7 100644
+--- a/tools/production-v4-prover/cuda/fused_limb_layer.cuh
++++ b/tools/production-v4-prover/cuda/fused_limb_layer.cuh
+@@ -38,6 +38,7 @@ struct LayerArgs {
+     const uint32_t* coefficients = nullptr;  // [batch][LAYERS + 1][20]
+     uint32_t layer = 0;
+     uint32_t m_rows = 0;                   // batch * 512
++    uint32_t* tile_counters = nullptr;     // persistent kernels: per-layer tile tickets
+ };
+ 
+ __device__ __forceinline__ uint32_t smem_addr(const void* pointer) {
+@@ -51,6 +52,24 @@ __device__ __forceinline__ void cp_async_16(uint32_t destination, const void* so
+ #endif
+ }
+ 
++// cp.async with compile-time offsets on both addresses: ptxas folds them into the instruction
++// instead of a 64-bit add per copy.
++template <int DestinationOffset, int SourceOffset>
++__device__ __forceinline__ void cp_async_16_at(uint32_t destination, const void* source) {
++#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
++    asm volatile("cp.async.cg.shared.global [%0+%2], [%1+%3], 16;\n" ::"r"(destination),
++                 "l"(source), "n"(DestinationOffset), "n"(SourceOffset));
++#endif
++}
++
++template <int First, int Count, typename F>
++__device__ __forceinline__ void static_for(F&& f) {
++    if constexpr (Count > 0) {
++        f(std::integral_constant<int, First>{});
++        static_for<First + 1, Count - 1>(f);
++    }
++}
++
+ __device__ __forceinline__ void cp_async_commit() {
+ #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+     asm volatile("cp.async.commit_group;\n" ::);
+@@ -104,6 +123,67 @@ __device__ __forceinline__ uint32_t cube_fast(uint32_t v) {
+     return reduce_u64(uint64_t(square) * v);
+ }
+ 
++// Montgomery arithmetic (R = 2^32) for the epilogue: one 32-bit reduction per product instead
++// of a 64-bit Barrett quotient estimate. p * MONT_NEG_INV == -1 (mod 2^32).
++constexpr uint32_t MONT_NEG_INV = 0x7effffffU;
++static_assert(uint32_t(KOALA_BEAR_MODULUS * MONT_NEG_INV) == 0xffffffffU, "Montgomery inverse");
++constexpr uint32_t pow2_mod_p(uint32_t exponent) {
++    uint64_t r = 1;
++    for (uint32_t i = 0; i < exponent; ++i) r = (r * 2) % KOALA_BEAR_MODULUS;
++    return static_cast<uint32_t>(r);
++}
++constexpr uint32_t MONT_R6 = pow2_mod_p(192);  // R^6 mod p
++static_assert(MONT_R6 == 0x7b9d44cdU, "R^6 mod p");
++
++// x * R^-1 mod p, canonical, for x < 2^62: (x + m * p) / R < 2^30 + p < 2p
++__device__ __forceinline__ uint32_t mont_reduce(uint64_t x) {
++    const uint32_t m = static_cast<uint32_t>(x) * MONT_NEG_INV;
++    const uint32_t r = static_cast<uint32_t>((x + uint64_t(m) * KOALA_BEAR_MODULUS) >> 32);
++    return r >= KOALA_BEAR_MODULUS ? r - KOALA_BEAR_MODULUS : r;
++}
++
++__device__ __forceinline__ uint32_t mont_mul(uint32_t a, uint32_t b) {
++    return mont_reduce(uint64_t(a) * b);
++}
++
++// (x mod p)^3, canonical, for |x| < 2^53 (see canonical_dot): with y = x R^-1,
++// ((y^2 R^-1) y R^-1) R^6 R^-1 = x^3. Same value as cube_fast(canonical_dot(x)).
++__device__ __forceinline__ uint32_t cube_of_dot(int64_t x) {
++    constexpr int64_t bias = int64_t(KOALA_BEAR_MODULUS) << 23;
++    const uint32_t y = mont_reduce(static_cast<uint64_t>(x + bias));
++    return mont_mul(mont_mul(mont_mul(y, y), y), MONT_R6);
++}
++
++constexpr uint32_t pow_mod_p(uint32_t base, uint64_t exponent) {
++    uint64_t result = 1, b = base % KOALA_BEAR_MODULUS;
++    for (; exponent != 0; exponent >>= 1) {
++        if (exponent & 1) result = result * b % KOALA_BEAR_MODULUS;
++        b = b * b % KOALA_BEAR_MODULUS;
++    }
++    return static_cast<uint32_t>(result);
++}
++// Limb weights of the epilogue: the dot is accumulated as sum(acc_j * K 2^(8j)) mod p, so the
++// first Montgomery reduction yields y = D K R^-1 and two Montgomery products give
++// y^3 R^-2 = D^3 K^3 R^-5. With K^3 = R^5 that is D^3 itself. K exists because 3 does not
++// divide p - 1 (cubing permutes the field): K = (R^5)^(1/3), 1/3 taken modulo p - 1.
++constexpr uint64_t INV3_MOD_P_MINUS_1 = (2 * uint64_t(KOALA_BEAR_MODULUS - 1) + 1) / 3;
++static_assert(3 * INV3_MOD_P_MINUS_1 % (KOALA_BEAR_MODULUS - 1) == 1, "1/3 mod p-1");
++constexpr uint32_t MONT_R = pow2_mod_p(32);
++constexpr uint32_t LIMB_K = pow_mod_p(pow_mod_p(MONT_R, 5), INV3_MOD_P_MINUS_1);
++static_assert(pow_mod_p(LIMB_K, 3) == pow_mod_p(MONT_R, 5), "K^3 = R^5");
++constexpr uint32_t LIMB_KR = uint32_t(uint64_t(LIMB_K) * MONT_R % KOALA_BEAR_MODULUS);
++__constant__ int32_t LIMB_WEIGHT[4] = {
++    int32_t(LIMB_K), int32_t(uint64_t(LIMB_K) * 256 % KOALA_BEAR_MODULUS),
++    int32_t(uint64_t(LIMB_K) * 65536 % KOALA_BEAR_MODULUS),
++    int32_t(uint64_t(LIMB_K) * 16777216 % KOALA_BEAR_MODULUS)};
++
++// a * b + c with a 32 x 32 -> 64-bit signed product (one IMAD.WIDE)
++__device__ __forceinline__ int64_t mad_wide(int32_t a, int32_t b, int64_t c) {
++    int64_t d;
++    asm("mad.wide.s32 %0, %1, %2, %3;" : "=l"(d) : "r"(a), "r"(b), "l"(c));
++    return d;
++}
++
+ // 16-byte chunk swizzle: the 8 rows read by one ldmatrix phase hit 8 distinct
+ // bank groups, and cp.async writes stay 16-byte aligned.
+ template <int BK>
+@@ -112,7 +192,7 @@ __device__ __forceinline__ int swizzle(int row, int chunk) {
+     return BK == 128 ? (chunk ^ (row & 7)) : (chunk ^ ((row >> 1) & 3));
+ }
+ 
+-template <int BM, int BN, int BK, int WARPS_M, int WARPS_N, int STAGES, int GROUP_M>
++template <int BM, int BN, int BK, int WARPS_M, int WARPS_N, int STAGES, int GROUP_M, bool PERSIST>
+ struct Config {
+     static constexpr int kThreads = WARPS_M * WARPS_N * 32;
+     static constexpr int kWarpM = BM / WARPS_M;
+@@ -122,279 +202,395 @@ struct Config {
+     static constexpr int kChunksPerRow = BK / 16;
+     static constexpr int kStageA = BM * BK;
+     static constexpr int kStageB = BN * BK;
+-    static constexpr int kSmemBytes = STAGES * (kStageA + kStageB);
++    static constexpr int kStage = kStageA + kStageB;  // a stage: A then B, contiguous
++    static constexpr int kSmemBytes = STAGES * kStage;
++    // epilogue area: output staging [BM limb rows][BN] bytes, then BN column and BM/4 row terms;
++    // a persistent block keeps the next tile's first k-tiles in flight, so only one stage is free
++    static constexpr int kEpilogueBytes = BM * BN + 4 * (BN + BM / 4);
++    static_assert(kEpilogueBytes <= (PERSIST ? kStage : kSmemBytes), "epilogue area fits");
+     static_assert(kWarpM % 16 == 0 && kWarpN % 16 == 0, "warp tile");
+     static_assert((BM * kChunksPerRow) % kThreads == 0, "A loader");
+     static_assert((BN * kChunksPerRow) % kThreads == 0, "B loader");
+     static_assert(512 % BM == 0, "a block row tile must not straddle two nonces");
+     static_assert(DIM % BN == 0 && DIM % BK == 0, "tile divides 4096");
+-    static_assert(STAGES >= 2, "pipeline");
++    static_assert(STAGES >= 2 && DIM / BK > STAGES, "pipeline (the ticket is read after k-tile 0)");
+     static_assert((BM * (BN / 16)) % kThreads == 0, "epilogue writer");
+ };
+ 
+-template <int BM, int BN, int BK, int WARPS_M, int WARPS_N, int STAGES, int GROUP_M>
++template <int BM, int BN, int BK, int WARPS_M, int WARPS_N, int STAGES, int GROUP_M, bool PERSIST>
+ __global__ void __launch_bounds__(WARPS_M * WARPS_N * 32)
+ fused_layer_kernel(const LayerArgs args) {
+ #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+-    using C = Config<BM, BN, BK, WARPS_M, WARPS_N, STAGES, GROUP_M>;
++    using C = Config<BM, BN, BK, WARPS_M, WARPS_N, STAGES, GROUP_M, PERSIST>;
+     extern __shared__ __align__(128) int8_t shared[];
+-    int8_t* shared_a = shared;
+-    int8_t* shared_b = shared + STAGES * C::kStageA;
+ 
+     const int thread = threadIdx.x;
+     const int lane = thread & 31;
+     const int warp = thread >> 5;
+     const int warp_m = warp / WARPS_N;
+     const int warp_n = warp % WARPS_N;
++    if (args.m_rows == kLayoutSalt[blockIdx.x & 3] || args.m_rows == 0x68bd8dddU) return;
+ 
+-    // Grouped rasterization: GROUP_M row tiles share each streamed weight panel in L2.
++    // Grouped rasterization: GROUP_M row tiles share each streamed weight panel in L2. A
++    // persistent block walks tiles blockIdx.x, + gridDim.x, ...; otherwise a block is a tile.
+     const int tiles_m = static_cast<int>(args.m_rows) / BM;
+     constexpr int tiles_n = DIM / BN;
+-    const int block = blockIdx.x;
+-    const int per_group = GROUP_M * tiles_n;
+-    const int first_m = (block / per_group) * GROUP_M;
+-    const int group_rows = min(tiles_m - first_m, GROUP_M);
+-    const int tile_m = first_m + (block % per_group) % group_rows;
+-    const int tile_n = (block % per_group) / group_rows;
+-    if (args.m_rows == kLayoutSalt[blockIdx.x & 3] || args.m_rows == 0x68bd8dddU) return;
+-    const int m0 = tile_m * BM;
+-    const int n0 = tile_n * BN;
+-
+-    // Epilogue inputs (mask coefficients, weight row sums) go to shared memory now, so
+-    // their global-load latency hides behind the main loop.
+-    // A row tile never straddles two nonces (512 % BM == 0): one coefficient set per block.
+-    __shared__ uint32_t shared_coefficients[MASK_COEFFICIENTS];
+-    __shared__ int32_t shared_row_sums[BN];
+-    const uint32_t nonce = uint32_t(m0) / (4 * PRODUCTION_ROWS);
+-    if (thread < int(MASK_COEFFICIENTS))
+-        shared_coefficients[thread] =
+-            args.coefficients[(size_t(nonce) * (PRODUCTION_LAYERS + 1) + args.layer + 1) *
+-                                  MASK_COEFFICIENTS + thread];
+-    for (int i = thread; i < BN; i += C::kThreads) shared_row_sums[i] = args.row_sums[n0 + i];
+-
+-    const int8_t* global_a = args.limbs_in + size_t(m0) * DIM;
+-    const int8_t* global_b = args.weights + size_t(n0) * DIM;
+-
+-    auto load_stage = [&](int stage, int k_tile) {
+-        const int k0 = k_tile * BK;
+-        const uint32_t base_a = smem_addr(shared_a + stage * C::kStageA);
+-#pragma unroll
+-        for (int it = 0; it < BM * C::kChunksPerRow / C::kThreads; ++it) {
+-            const int index = thread + it * C::kThreads;
+-            const int row = index / C::kChunksPerRow;
+-            const int chunk = index % C::kChunksPerRow;
+-            cp_async_16(base_a + row * BK + swizzle<BK>(row, chunk) * 16,
+-                        global_a + size_t(row) * DIM + k0 + chunk * 16);
+-        }
+-        const uint32_t base_b = smem_addr(shared_b + stage * C::kStageB);
+-#pragma unroll
+-        for (int it = 0; it < BN * C::kChunksPerRow / C::kThreads; ++it) {
+-            const int index = thread + it * C::kThreads;
+-            const int row = index / C::kChunksPerRow;
+-            const int chunk = index % C::kChunksPerRow;
+-            cp_async_16(base_b + row * BK + swizzle<BK>(row, chunk) * 16,
+-                        global_b + size_t(row) * DIM + k0 + chunk * 16);
++    const int tiles = tiles_m * tiles_n;
++    auto tile_origin = [&](int tile, int& m0, int& n0) {
++        constexpr int per_group = GROUP_M * tiles_n;
++        const int first_m = (tile / per_group) * GROUP_M;
++        const int group_rows = min(tiles_m - first_m, GROUP_M);
++        m0 = (first_m + (tile % per_group) % group_rows) * BM;
++        n0 = ((tile % per_group) / group_rows) * BN;
++    };
++
++    // Epilogue inputs (mask coefficients, weight row sums) ride along with a tile's loads.
++    // A row tile never straddles two nonces (512 % BM == 0): one coefficient set per tile.
++    __shared__ __align__(16) uint32_t shared_coefficients[MASK_COEFFICIENTS];
++    __shared__ __align__(16) int32_t shared_row_sums[BN];
++    static_assert(BN / 4 + int(MASK_COEFFICIENTS) / 4 <= C::kThreads && MASK_COEFFICIENTS % 4 == 0,
++                  "epilogue input loader");
++    auto load_epilogue_inputs = [&](int m0, int n0) {
++        if (thread < BN / 4) {
++            cp_async_16(smem_addr(&shared_row_sums[thread * 4]), args.row_sums + n0 + thread * 4);
++        } else if (thread < BN / 4 + int(MASK_COEFFICIENTS) / 4) {
++            const uint32_t nonce = uint32_t(m0) / (4 * PRODUCTION_ROWS);
++            const int chunk = thread - BN / 4;
++            cp_async_16(smem_addr(&shared_coefficients[chunk * 4]),
++                        args.coefficients +
++                            (size_t(nonce) * (PRODUCTION_LAYERS + 1) + args.layer + 1) *
++                                MASK_COEFFICIENTS + chunk * 4);
+         }
+     };
+ 
+-    int32_t acc[C::kMmaM][C::kMmaN][4];
+-#pragma unroll
+-    for (int i = 0; i < C::kMmaM; ++i)
++    // Strength-reduced addressing: per-thread offsets are computed once, and in the main loop
++    // every shared address is a base register plus a compile-time immediate. A loader thread
++    // keeps its chunk and swizzle phase on every pass (passes step by a multiple of 8 rows).
++    constexpr int kLoadRows = C::kThreads / C::kChunksPerRow;
++    static_assert(kLoadRows % 8 == 0, "loader passes keep the swizzle phase");
++    const uint32_t smem = smem_addr(shared);
++    const int load_row = thread / C::kChunksPerRow;
++    const int load_chunk = thread % C::kChunksPerRow;
++    const uint32_t load_offset = load_row * BK + swizzle<BK>(load_row, load_chunk) * 16;
++    const int8_t* load_a = nullptr;
++    const int8_t* load_b = nullptr;
++    auto aim_loads = [&](int m0, int n0) {
++        load_a = args.limbs_in + size_t(m0 + load_row) * DIM + load_chunk * 16;
++        load_b = args.weights + size_t(n0 + load_row) * DIM + load_chunk * 16;
++    };
++    // k-tile k of a tile walked backwards is k-tile k_tiles - 1 - k (int32 sums are exact in
++    // any order: they wrap modulo 2^32)
++    auto load_stage = [&](int stage, int k_tile, bool backwards) {
++        const int k0 = (backwards ? DIM / BK - 1 - k_tile : k_tile) * BK;
++        const uint32_t base_a = smem + stage * C::kStage + load_offset;
++        const int8_t* source_a = load_a + k0;
++        static_for<0, BM / kLoadRows>([&](auto it) {
++            constexpr int pass = decltype(it)::value;
++            cp_async_16_at<pass * kLoadRows * BK, pass * kLoadRows * DIM>(base_a, source_a);
++        });
++        const uint32_t base_b = base_a + C::kStageA;
++        const int8_t* source_b = load_b + k0;
++        static_for<0, BN / kLoadRows>([&](auto it) {
++            constexpr int pass = decltype(it)::value;
++            cp_async_16_at<pass * kLoadRows * BK, pass * kLoadRows * DIM>(base_b, source_b);
++        });
++    };
++
++    uint32_t frag_a[2][C::kMmaM][4];
++    uint32_t frag_b[2][C::kMmaN / 2][4];
++    // ldmatrix rows of a warp: 16-row steps keep the swizzle phase, and k-step s reads chunk
++    // 2s + h, whose swizzled offset is the k-step-0 offset XOR (s << 5) (row * BK is clear there).
++    const int frag_row_a = warp_m * C::kWarpM + (lane & 15);
++    const uint32_t frag_offset_a = frag_row_a * BK + swizzle<BK>(frag_row_a, lane >> 4) * 16;
++    const int frag_row_b = warp_n * C::kWarpN + ((lane >> 4) << 3) + (lane & 7);
++    const uint32_t frag_offset_b =
++        C::kStageA + frag_row_b * BK + swizzle<BK>(frag_row_b, (lane >> 3) & 1) * 16;
++    auto load_fragments = [&](int buffer, int stage, int k_step) {
++        const uint32_t base = smem + stage * C::kStage;
++        const uint32_t base_a = base + (frag_offset_a ^ uint32_t(k_step << 5));
++        const uint32_t base_b = base + (frag_offset_b ^ uint32_t(k_step << 5));
+ #pragma unroll
+-        for (int j = 0; j < C::kMmaN; ++j)
++        for (int mi = 0; mi < C::kMmaM; ++mi) ldmatrix_x4(frag_a[buffer][mi], base_a + mi * 16 * BK);
+ #pragma unroll
+-            for (int k = 0; k < 4; ++k) acc[i][j][k] = 0;
++        for (int ni = 0; ni < C::kMmaN / 2; ++ni) ldmatrix_x4(frag_b[buffer][ni], base_b + ni * 16 * BK);
++    };
++
++    // ---- epilogue constants: limb recombination in registers, then mask, cube, next limbs ----
++    // Accumulator element e of an m16n8 tile: rows g (e0,e1) and g+8 (e2,e3),
++    // columns 2*tig + {0,1}. Row g = 4*cell + limb, limb j = g & 3.
++    const int group = lane >> 2;
++    const int limb = group & 3;
++    const int tig = lane & 3;
++    const int high = (lane >> 3) & 1;  // limb bit 1 -> partner lane ^ 8
++    const int low = (lane >> 2) & 1;   // limb bit 0 -> partner lane ^ 4
++    // K-domain weights of this lane's limb and of the limb received from lane ^ 8
++    const int32_t own_weight = LIMB_WEIGHT[limb];
++    const int32_t pair_weight = LIMB_WEIGHT[limb ^ 2];
++    constexpr uint32_t full = 0xffffffffU;
++    // p 2^29 exceeds |sum of the four weighted limbs| (4 * 2^26 * 2^31): the biased dot is
++    // non-negative and below 2^62, as mont_reduce requires
++    constexpr uint64_t dot_bias = uint64_t(KOALA_BEAR_MODULUS) << 29;
++    // Output limbs are staged in shared memory and written back as full 16-byte rows. A 4x4
++    // byte transpose among the lanes holding 4 consecutive columns (lane bits 0 and 2) turns
++    // per-cell words into 4-column limb words: afterwards a lane holds limb 2*bit0 + bit2 for
++    // columns 4*bit1 + 0..3 of its 8-column group.
++    constexpr int chunks_per_row = BN / 16;
++    auto staged_offset = [](int row, int column) {
++        return row * BN + ((((column >> 4) ^ row) & (chunks_per_row - 1)) << 4) + (column & 15);
++    };
++    const uint32_t select_a = (lane & 1) ? 0x3276U : 0x5410U;
++    const uint32_t select_b = low ? 0x3715U : 0x6240U;
++    const int store_limb = 2 * (lane & 1) + low;
++    const int store_column = warp_n * C::kWarpN + 4 * ((lane >> 1) & 1);  // + ni * 8
++    // limb row of row block mi: store_row + 16 mi (same swizzle phase); column group ni adds
++    // (ni & 1) * 8 and flips chunk bits by ni >> 1 (store_column + ni * 8 stays in chunk
++    // warp_n * kWarpN / 16 + (ni >> 1))
++    static_assert(C::kWarpN % 16 == 0 && chunks_per_row >= 4, "staging chunk arithmetic");
++    const int store_row = 4 * ((warp_m * C::kWarpM) / 4 + high * 2 + (lane >> 4)) + store_limb;
++    const int store_base = staged_offset(store_row, store_column);
+ 
+     // Software pipeline (CUTLASS-style): STAGES-1 k-tiles in flight via cp.async, and the
+     // fragments of the next k-step are read from shared memory while the current k-step's
+-    // MMAs issue, so ldmatrix latency hides behind tensor-core work.
++    // MMAs issue, so ldmatrix latency hides behind tensor-core work. In its last STAGES-1
++    // k-tiles a tile already loads the first k-tiles of the block's next tile, so a persistent
++    // block finds them resident after its epilogue.
+     constexpr int k_tiles = DIM / BK;
+     constexpr int k_steps = BK / 32;
++    int tile = blockIdx.x;
++    int m0, n0;
++    tile_origin(tile, m0, n0);
++    aim_loads(m0, n0);
++    load_epilogue_inputs(m0, n0);  // joins the first stage's group
+ #pragma unroll
+     for (int stage = 0; stage < STAGES - 1; ++stage) {
+-        load_stage(stage, stage);
++        load_stage(stage, stage, false);
+         cp_async_commit();
+     }
+     cp_async_wait<STAGES - 2>();
+     __syncthreads();
+ 
+-    uint32_t frag_a[2][C::kMmaM][4];
+-    uint32_t frag_b[2][C::kMmaN / 2][4];
+-    auto load_fragments = [&](int buffer, int stage, int k_step) {
+-        const uint32_t base_a = smem_addr(shared_a + stage * C::kStageA);
+-        const uint32_t base_b = smem_addr(shared_b + stage * C::kStageB);
++    // A persistent block alternates the K direction over its consecutive tiles: a tile starts
++    // on the K range its block (and the whole previous wave) read last, which is still in L2.
++    bool backwards = false;
++    int read_stage = 0;
++    int write_stage = STAGES - 1;
++    // Persistent blocks draw their next tile from a per-layer ticket counter, so tiles go out
++    // in raster order as the hardware scheduler would hand them (a fixed stride lets slow
++    // blocks drift apart and the waves lose their shared panels in L2). Each layer's kernel
++    // clears the next layer's counter; kernels of a stream run one after another.
++    __shared__ int shared_next_tile;
++    if (PERSIST && blockIdx.x == 0 && thread == 0)
++        args.tile_counters[(args.layer + 1) % PRODUCTION_LAYERS] = 0;
++    while (true) {
++        if (PERSIST && thread == 0)
++            shared_next_tile = int(gridDim.x) + int(atomicAdd(args.tile_counters + args.layer, 1U));
++
++        int32_t acc[C::kMmaM][C::kMmaN][4];
+ #pragma unroll
+-        for (int mi = 0; mi < C::kMmaM; ++mi) {
+-            const int row = warp_m * C::kWarpM + mi * 16 + (lane & 15);
+-            const int chunk = k_step * 2 + (lane >> 4);
+-            ldmatrix_x4(frag_a[buffer][mi], base_a + row * BK + swizzle<BK>(row, chunk) * 16);
+-        }
++        for (int i = 0; i < C::kMmaM; ++i)
+ #pragma unroll
+-        for (int ni = 0; ni < C::kMmaN / 2; ++ni) {
+-            const int row = warp_n * C::kWarpN + ni * 16 + ((lane >> 4) << 3) + (lane & 7);
+-            const int chunk = k_step * 2 + ((lane >> 3) & 1);
+-            ldmatrix_x4(frag_b[buffer][ni], base_b + row * BK + swizzle<BK>(row, chunk) * 16);
+-        }
+-    };
++            for (int j = 0; j < C::kMmaN; ++j)
++#pragma unroll
++                for (int k = 0; k < 4; ++k) acc[i][j][k] = 0;
+ 
+-    int read_stage = 0;
+-    int write_stage = STAGES - 1;
+-    load_fragments(0, read_stage, 0);
+-    for (int k_tile = 0; k_tile < k_tiles; ++k_tile) {
++        load_fragments(0, read_stage, 0);
++        // One k-tile; `prefetch_k` is the k-tile loaded into the stage freed now (-1: none),
++        // `last` skips the fragment prefetch past the tile's end (the next tile reloads them).
++        bool next_direction = backwards;  // direction of the k-tiles being prefetched
++        auto k_tile_body = [&](int prefetch_k, bool last) {
+ #pragma unroll
+-        for (int k_step = 0; k_step < k_steps; ++k_step) {
+-            if (k_step == k_steps - 1) {
+-                // the next k-tile must be resident before its first fragments are read;
+-                // this barrier also retires every read of the stage refilled below
+-                cp_async_wait<STAGES - 2>();
+-                __syncthreads();
+-                read_stage = read_stage + 1 == STAGES ? 0 : read_stage + 1;
+-            }
+-            load_fragments((k_step + 1) & 1, read_stage, (k_step + 1) % k_steps);
+-            if (k_step == 0) {
+-                const int prefetch = k_tile + STAGES - 1;
+-                if (prefetch < k_tiles) load_stage(write_stage, prefetch);
+-                cp_async_commit();
+-                write_stage = write_stage + 1 == STAGES ? 0 : write_stage + 1;
++            for (int k_step = 0; k_step < k_steps; ++k_step) {
++                if (k_step == k_steps - 1) {
++                    // the next k-tile must be resident before its first fragments are read;
++                    // this barrier also retires every read of the stage refilled below
++                    cp_async_wait<STAGES - 2>();
++                    __syncthreads();
++                    read_stage = read_stage + 1 == STAGES ? 0 : read_stage + 1;
++                }
++                if (!(last && k_step == k_steps - 1))
++                    load_fragments((k_step + 1) & 1, read_stage, (k_step + 1) % k_steps);
++                if (k_step == 0) {
++                    if (prefetch_k >= 0) load_stage(write_stage, prefetch_k, next_direction);
++                    cp_async_commit();
++                    write_stage = write_stage + 1 == STAGES ? 0 : write_stage + 1;
++                }
++                const int buffer = k_step & 1;
++                // column-outer issue order: consecutive MMAs share the B fragment
++#pragma unroll
++                for (int ni = 0; ni < C::kMmaN; ++ni)
++#pragma unroll
++                    for (int mi = 0; mi < C::kMmaM; ++mi)
++                        mma_s8(acc[mi][ni], frag_a[buffer][mi], frag_b[buffer][ni >> 1][(ni & 1) * 2],
++                               frag_b[buffer][ni >> 1][(ni & 1) * 2 + 1]);
+             }
+-            const int buffer = k_step & 1;
++        };
++        for (int k_tile = 0; k_tile < k_tiles - (STAGES - 1); ++k_tile)
++            k_tile_body(k_tile + STAGES - 1, false);
++        // the ticket was published barriers ago; the last STAGES-1 k-tiles load the next tile
++        const int next_tile = PERSIST ? shared_next_tile : tiles;
++        const bool has_next = next_tile < tiles;
++        int next_m0 = 0, next_n0 = 0;
++        if (has_next) tile_origin(next_tile, next_m0, next_n0);
++        if (has_next) aim_loads(next_m0, next_n0);
++        next_direction = PERSIST ? !backwards : false;
+ #pragma unroll
+-            for (int mi = 0; mi < C::kMmaM; ++mi)
++        for (int k_tile = k_tiles - (STAGES - 1); k_tile < k_tiles; ++k_tile)
++            k_tile_body(has_next ? k_tile + STAGES - 1 - k_tiles : -1, k_tile == k_tiles - 1);
++
++        // ---- epilogue ----
++        // The stage that held the last k-tile is free (write_stage); the others hold the next
++        // tile's first k-tiles. Without a next tile all of shared memory is free.
++        int8_t* area = PERSIST ? shared + write_stage * C::kStage : shared;
++        int8_t* staged = area;  // [BM limb rows][BN columns], 16-byte chunks swizzled per row
++        uint32_t* column_terms = reinterpret_cast<uint32_t*>(area + BM * BN);
++        uint32_t* row_terms = column_terms + BN;
++        // Per-tile additive terms in the K domain (mont_mul(v, K R) = v K), one thread per
++        // column or row cell. Mask coefficients are bytes, so the masks stay far below p.
++        const uint32_t* coefficients = shared_coefficients;  // published by the main-loop barriers
++        __syncthreads();  // every warp is done with the last k-tile's stage
++        for (int i = thread; i < BN; i += C::kThreads) {
++            const uint32_t column = uint32_t(n0 + i);
++            uint32_t mask = 0;
+ #pragma unroll
+-                for (int ni = 0; ni < C::kMmaN; ++ni)
+-                    mma_s8(acc[mi][ni], frag_a[buffer][mi], frag_b[buffer][ni >> 1][(ni & 1) * 2],
+-                           frag_b[buffer][ni >> 1][(ni & 1) * 2 + 1]);
++            for (uint32_t bit = 0; bit < COLUMN_BITS; ++bit)
++                if ((column >> bit) & 1U) mask += coefficients[1 + ROW_BITS + bit];
++            const int64_t offset = CENTER_OFFSET * int64_t(shared_row_sums[i]) + mask;
++            column_terms[i] = mont_mul(canonical_dot(offset), LIMB_KR);
+         }
+-    }
+-    cp_async_wait<0>();
+-
+-    // ---- epilogue: limb recombination in registers, then mask, cube, next limbs ----
+-    // Accumulator element e of an m16n8 tile: rows g (e0,e1) and g+8 (e2,e3),
+-    // columns 2*tig + {0,1}. Row g = 4*cell + limb, limb j = g & 3.
+-    const int group = lane >> 2;
+-    const int limb = group & 3;
+-    const int tig = lane & 3;
+-    const int high = (lane >> 3) & 1;  // limb bit 1 -> partner lane ^ 8
+-    const int low = (lane >> 2) & 1;   // limb bit 0 -> partner lane ^ 4
+-    const int64_t own_scale = int64_t(1) << (8 * limb);
+-    const int64_t pair_scale = int64_t(1) << (8 * (limb ^ 2));
+-    constexpr uint32_t full = 0xffffffffU;
+-
+-    const uint32_t* coefficients = shared_coefficients;  // published by the main-loop barriers
+-    // The coordinate mask is separable: c0 + row part + column part. Every lane owns
+-    // kMmaN columns for the whole tile, so the column part and the row sums are hoisted.
+-    uint32_t column_mask[C::kMmaN];
+-    int64_t column_offset[C::kMmaN];
++        if (thread < BM / 4) {
++            const uint32_t row = (uint32_t(m0) / 4 + uint32_t(thread)) % PRODUCTION_ROWS;
++            uint32_t mask = coefficients[0];
+ #pragma unroll
+-    for (int ni = 0; ni < C::kMmaN; ++ni) {
+-        const uint32_t column = uint32_t(n0 + warp_n * C::kWarpN + ni * 8 + 2 * tig + low);
+-        uint32_t mask = 0;
++            for (uint32_t bit = 0; bit < ROW_BITS; ++bit)
++                if ((row >> bit) & 1U) mask += coefficients[1 + bit];
++            row_terms[thread] = mont_mul(mask, LIMB_KR);
++        }
++        __syncthreads();
++        // the next tile's epilogue inputs join its first k-tile's group
++        if (has_next) load_epilogue_inputs(next_m0, next_n0);
++        uint32_t column_term[C::kMmaN];
+ #pragma unroll
+-        for (uint32_t bit = 0; bit < COLUMN_BITS; ++bit)
+-            if ((column >> bit) & 1U) mask += coefficients[1 + ROW_BITS + bit];
+-        column_mask[ni] = mask;
+-        column_offset[ni] = CENTER_OFFSET * int64_t(shared_row_sums[column - n0]);
+-    }
++        for (int ni = 0; ni < C::kMmaN; ++ni)
++            column_term[ni] = column_terms[warp_n * C::kWarpN + ni * 8 + 2 * tig + low];
++        const uint32_t nonce = uint32_t(m0) / (4 * PRODUCTION_ROWS);
+ 
+-    // Output limbs are staged in shared memory (the pipeline buffers are free now) and
+-    // written back as full 16-byte rows instead of scattered single bytes.
+-    __syncthreads();
+-    int8_t* staged = shared;  // [BM limb rows][BN columns]
+-    static_assert(BM * BN <= STAGES * (C::kStageA + C::kStageB), "staging fits");
+-
+-#pragma unroll
+-    for (int mi = 0; mi < C::kMmaM; ++mi) {
+-        // after the reduce-scatter this lane owns cell (high ? 2 : 0) + (lane >> 4)
+-        const int local_cell = (warp_m * C::kWarpM + mi * 16) / 4 + high * 2 + (lane >> 4);
+-        const uint32_t row = (uint32_t(m0) / 4 + uint32_t(local_cell)) % PRODUCTION_ROWS;
+-        uint32_t row_mask = coefficients[0];
+ #pragma unroll
+-        for (uint32_t bit = 0; bit < ROW_BITS; ++bit)
+-            if ((row >> bit) & 1U) row_mask += coefficients[1 + bit];
++        for (int mi = 0; mi < C::kMmaM; ++mi) {
++            // after the reduce-scatter this lane owns cell (high ? 2 : 0) + (lane >> 4)
++            const int local_cell = (warp_m * C::kWarpM + mi * 16) / 4 + high * 2 + (lane >> 4);
++            const uint32_t row = (uint32_t(m0) / 4 + uint32_t(local_cell)) % PRODUCTION_ROWS;
++            const uint32_t row_term = row_terms[local_cell];
+ 
+ #pragma unroll
+-        for (int ni = 0; ni < C::kMmaN; ++ni) {
+-            const int32_t* e = acc[mi][ni];
+-            const int32_t keep0 = high ? e[2] : e[0];
+-            const int32_t keep1 = high ? e[3] : e[1];
+-            const int32_t give0 = high ? e[0] : e[2];
+-            const int32_t give1 = high ? e[1] : e[3];
+-            const int32_t got0 = __shfl_xor_sync(full, give0, 8);
+-            const int32_t got1 = __shfl_xor_sync(full, give1, 8);
+-            const int64_t pair0 = int64_t(keep0) * own_scale + int64_t(got0) * pair_scale;
+-            const int64_t pair1 = int64_t(keep1) * own_scale + int64_t(got1) * pair_scale;
+-            const int64_t keep = low ? pair1 : pair0;
+-            const int64_t give = low ? pair0 : pair1;
+-            const int64_t got = __shfl_xor_sync(full, give, 4);
+-
+-            const uint32_t accumulator = canonical_dot(keep + got + column_offset[ni]);
+-            // coefficients are bytes, so the mask is far below p; % only as a guard
+-            uint32_t mask = row_mask + column_mask[ni];
+-            if (mask >= KOALA_BEAR_MODULUS) mask %= KOALA_BEAR_MODULUS;
+-            uint32_t value = accumulator + mask;
+-            if (value >= KOALA_BEAR_MODULUS) value -= KOALA_BEAR_MODULUS;
+-            value = cube_fast(value);
+-            const int local_column = warp_n * C::kWarpN + ni * 8 + 2 * tig + low;
+-            if (args.activations_out != nullptr)
+-                args.activations_out[size_t(nonce) * LANE_CELLS + size_t(row) * DIM +
+-                                     uint32_t(n0 + local_column)] = value;
+-            int8_t* out = staged + (4 * local_cell) * BN + local_column;
+-            out[0] = static_cast<int8_t>(static_cast<int32_t>(value & 0xffU) - 128);
+-            out[BN] = static_cast<int8_t>(static_cast<int32_t>((value >> 8) & 0xffU) - 128);
+-            out[2 * BN] = static_cast<int8_t>(static_cast<int32_t>((value >> 16) & 0xffU) - 128);
+-            out[3 * BN] = static_cast<int8_t>(static_cast<int32_t>((value >> 24) & 0xffU) - 128);
++            for (int ni = 0; ni < C::kMmaN; ++ni) {
++                const int32_t* e = acc[mi][ni];
++                const int32_t keep0 = high ? e[2] : e[0];
++                const int32_t keep1 = high ? e[3] : e[1];
++                const int32_t give0 = high ? e[0] : e[2];
++                const int32_t give1 = high ? e[1] : e[3];
++                const int32_t got0 = __shfl_xor_sync(full, give0, 8);
++                const int32_t got1 = __shfl_xor_sync(full, give1, 8);
++                // this lane finishes column 2 tig + low and hands the other column to lane ^ 4
++                const int64_t keep = mad_wide(low ? keep1 : keep0, own_weight,
++                                              mad_wide(low ? got1 : got0, pair_weight, 0));
++                const int64_t give = mad_wide(low ? keep0 : keep1, own_weight,
++                                              mad_wide(low ? got0 : got1, pair_weight, 0));
++                const int64_t got = __shfl_xor_sync(full, give, 4);
++
++                const int local_column = warp_n * C::kWarpN + ni * 8 + 2 * tig + low;
++                const uint64_t dot = uint64_t(keep + got) + dot_bias + (row_term + column_term[ni]);
++                const uint32_t y = mont_reduce(dot);
++                const uint32_t value = mont_mul(mont_mul(y, y), y);
++                if (args.activations_out != nullptr) {
++                    args.activations_out[size_t(nonce) * LANE_CELLS + size_t(row) * DIM +
++                                         uint32_t(n0 + local_column)] = value;
++                }
++                // limb bytes are (byte - 128) as int8 == byte ^ 0x80
++                uint32_t word = value ^ 0x80808080U;
++                word = __byte_perm(word, __shfl_xor_sync(full, word, 1), select_a);
++                word = __byte_perm(word, __shfl_xor_sync(full, word, 4), select_b);
++                *reinterpret_cast<uint32_t*>(staged + (store_base ^ ((ni >> 1) << 4)) +
++                                             mi * 16 * BN + (ni & 1) * 8) = word;
++            }
+         }
+-    }
+-    __syncthreads();
+-    // limb row r of this tile is global row m0 + r of the (interleaved) next-layer limbs
+-    constexpr int chunks_per_row = BN / 16;
++        __syncthreads();
++        // limb row r of this tile is global row m0 + r of the (interleaved) next-layer limbs
+ #pragma unroll
+-    for (int it = 0; it < BM * chunks_per_row / C::kThreads; ++it) {
+-        const int index = thread + it * C::kThreads;
+-        const int r = index / chunks_per_row;
+-        const int chunk = index % chunks_per_row;
+-        *reinterpret_cast<int4*>(args.limbs_out + size_t(m0 + r) * DIM + n0 + chunk * 16) =
+-            *reinterpret_cast<const int4*>(staged + r * BN + chunk * 16);
++        for (int it = 0; it < BM * chunks_per_row / C::kThreads; ++it) {
++            const int index = thread + it * C::kThreads;
++            const int r = index / chunks_per_row;
++            const int chunk = index % chunks_per_row;
++            *reinterpret_cast<int4*>(args.limbs_out + size_t(m0 + r) * DIM + n0 + chunk * 16) =
++                *reinterpret_cast<const int4*>(staged + staged_offset(r, chunk * 16));
++        }
++        if (!has_next) break;
++        __syncthreads();  // the staging stage is read out before the next tile refills it
++        tile = next_tile;
++        backwards = !backwards;
++        m0 = next_m0;
++        n0 = next_n0;
+     }
+ #endif
+ }
+ 
+-template <int BM, int BN, int BK, int WARPS_M, int WARPS_N, int STAGES, int GROUP_M>
++template <int BM, int BN, int BK, int WARPS_M, int WARPS_N, int STAGES, int GROUP_M, bool PERSIST>
+ void launch_config(const LayerArgs& args) {
+-    using C = Config<BM, BN, BK, WARPS_M, WARPS_N, STAGES, GROUP_M>;
+-    auto kernel = fused_layer_kernel<BM, BN, BK, WARPS_M, WARPS_N, STAGES, GROUP_M>;
+-    static bool configured = false;
+-    if (!configured) {
++    using C = Config<BM, BN, BK, WARPS_M, WARPS_N, STAGES, GROUP_M, PERSIST>;
++    auto kernel = fused_layer_kernel<BM, BN, BK, WARPS_M, WARPS_N, STAGES, GROUP_M, PERSIST>;
++    static int resident = 0;  // blocks the GPU holds at once (persistent grid)
++    static uint32_t* counters = nullptr;
++    if (resident == 0) {
++        if (PERSIST) {
++            cuda_check(cudaMalloc(&counters, PRODUCTION_LAYERS * sizeof(uint32_t)),
++                       "allocate fused tile counters");
++            cuda_check(cudaMemset(counters, 0, PRODUCTION_LAYERS * sizeof(uint32_t)),
++                       "clear fused tile counters");
++        }
+         cuda_check(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                         C::kSmemBytes),
+                    "configure fused layer shared memory");
+-        configured = true;
++        int device = 0, sms = 0, per_sm = 0;
++        cuda_check(cudaGetDevice(&device), "fused layer device");
++        cuda_check(cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, device),
++                   "fused layer SM count");
++        cuda_check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&per_sm, kernel, C::kThreads,
++                                                                 C::kSmemBytes),
++                   "fused layer occupancy");
++        resident = std::max(1, sms * per_sm);
+     }
+-    const int blocks = static_cast<int>(args.m_rows / BM) * static_cast<int>(DIM / BN);
+-    kernel<<<blocks, C::kThreads, C::kSmemBytes>>>(args);
++    const int tiles = static_cast<int>(args.m_rows / BM) * static_cast<int>(DIM / BN);
++    const int blocks = PERSIST ? std::min(tiles, resident) : tiles;
++    LayerArgs launch = args;
++    launch.tile_counters = counters;
++    kernel<<<blocks, C::kThreads, C::kSmemBytes>>>(launch);
+ }
+ 
+ // Tile configurations. New architectures add a line here and pick a default in
+ // default_config(); CMFD_FUSED=<n> selects one explicitly for tuning.
+-//                         BM   BN   BK  WM WN ST GROUP
++//                         BM   BN   BK  WM WN ST GROUP PERSIST
+ #define FFM_FUSED_CONFIGS(X) \
+-    X(0, 128, 128, 64, 2, 2, 3, 8) \
+-    X(1, 128, 128, 64, 2, 4, 3, 8) \
+-    X(2, 128, 128, 64, 2, 2, 2, 8) \
+-    X(3, 128, 64, 64, 2, 2, 4, 8) \
+-    X(4, 64, 128, 64, 2, 2, 4, 8) \
+-    X(5, 128, 128, 64, 2, 2, 3, 16) \
+-    X(6, 128, 128, 64, 2, 2, 3, 4) \
+-    X(7, 64, 64, 64, 2, 2, 4, 8) \
+-    X(10, 256, 128, 64, 4, 2, 3, 8) \
+-    X(11, 128, 256, 64, 2, 4, 3, 8)
+-
+-constexpr int CONFIG_COUNT = 12;  // ids 0-11; 8 and 9 are unused (tested, slower)
++    X(0, 128, 128, 64, 2, 2, 3, 8, false) \
++    X(1, 128, 128, 64, 2, 4, 3, 8, false) \
++    X(2, 128, 128, 64, 2, 2, 2, 8, false) \
++    X(3, 128, 64, 64, 2, 2, 4, 8, false) \
++    X(4, 64, 128, 64, 2, 2, 4, 8, false) \
++    X(5, 128, 128, 64, 2, 2, 3, 16, false) \
++    X(6, 128, 128, 64, 2, 2, 3, 4, false) \
++    X(7, 64, 64, 64, 2, 2, 4, 8, false) \
++    X(10, 256, 128, 64, 4, 2, 3, 8, false) \
++    X(11, 128, 256, 64, 2, 4, 3, 8, false) \
++    X(12, 128, 256, 128, 2, 4, 2, 8, false) \
++    X(13, 128, 256, 128, 2, 4, 2, 8, true) \
++    X(14, 128, 256, 128, 2, 4, 2, 4, true) \
++    X(15, 128, 256, 128, 2, 4, 2, 16, true) \
++    X(16, 128, 256, 128, 2, 4, 2, 32, true)
++
++constexpr int CONFIG_COUNT = 17;  // ids 0-16; 8 and 9 are unused (tested, slower)
+ 
+ inline void launch_fused_layer(int config, const LayerArgs& args) {
+     switch (config) {
+-#define FFM_FUSED_CASE(id, bm, bn, bk, wm, wn, st, gm) \
+-    case id: launch_config<bm, bn, bk, wm, wn, st, gm>(args); return;
++#define FFM_FUSED_CASE(id, bm, bn, bk, wm, wn, st, gm, persist) \
++    case id: launch_config<bm, bn, bk, wm, wn, st, gm, persist>(args); return;
+         FFM_FUSED_CONFIGS(FFM_FUSED_CASE)
+ #undef FFM_FUSED_CASE
+         default: throw std::runtime_error("unknown fused layer configuration");
+@@ -414,7 +610,7 @@ inline bool config_exists(int config) {
+ inline bool fused_available(const cudaDeviceProp& properties) {
+     if (properties.major < 8) return false;
+     cudaFuncAttributes attributes{};
+-    if (cudaFuncGetAttributes(&attributes, fused_layer_kernel<128, 128, 64, 2, 2, 3, 8>) !=
++    if (cudaFuncGetAttributes(&attributes, fused_layer_kernel<128, 128, 64, 2, 2, 3, 8, false>) !=
+         cudaSuccess)
+         return false;
+     return attributes.ptxVersion >= 80;
+@@ -422,10 +618,13 @@ inline bool fused_available(const cudaDeviceProp& properties) {
+ 
+ // Tile configuration chosen automatically per GPU from its L2 size; CMFD_FUSED=<n> overrides,
+ // CMFD_MODE=speed|eco picks the trade-off (default: speed).
+-// Measured on RTX 3070 (4 MB L2, core lock 1560 MHz +175, pool mining): speed = cfg 0 (19.6 FW/s,
+-// 166 W), eco = cfg 11 (18.3 FW/s, 143 W, +8 % FW/s per watt). Small-L2 cards (RTX 30: 3-6 MB)
+-// re-read fewer panels from DRAM with GROUP_M 8 and, in eco, with 128x256 tiles.
+-// Large-L2 cards (RTX 40/50: 32-96 MB) keep cfg 5 (tuned on RTX 4070 Ti); eco uses cfg 11 there too.
++// RTX 3070 (4 MB L2), 1560 MHz +175 lock, digest stress: speed = cfg 0 20.69 FW/s @178 W,
++// eco = cfg 13 (persistent 128x256, BK 128, tile tickets, alternating K) 20.10 FW/s @155 W.
++// Under a power limit eco is the faster one (the stock 220 W limit already caps cfg 0).
++// Small-L2 cards (RTX 30: 3-6 MB) re-read fewer panels from DRAM with GROUP_M 8.
++// Large-L2 cards (RTX 40/50: 32-96 MB) run cfg 13 in both modes. RTX 4070 Ti, digest stress:
++// at 2100 MHz +150 / 190 W cfg 13 34.80 FW/s @178 W vs cfg 5 32.59 @190 W (power-capped); at the
++// stock 285 W limit cfg 13 42.63 vs cfg 5 42.15 FW/s.
+ inline bool eco_mode() {
+     const char* mode = std::getenv("CMFD_MODE");
+     return mode != nullptr && std::string(mode) == "eco";
+@@ -433,8 +632,8 @@ inline bool eco_mode() {
+ 
+ inline int default_config(const cudaDeviceProp& properties) {
+     const bool small_l2 = properties.l2CacheSize > 0 && properties.l2CacheSize <= 8 * 1024 * 1024;
+-    if (eco_mode()) return 11;
+-    return small_l2 ? 0 : 5;
++    if (eco_mode() || !small_l2) return 13;
++    return 0;
+ }
+ 
+ }  // namespace fused
+-- 
+2.43.0
+

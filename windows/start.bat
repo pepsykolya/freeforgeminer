@@ -17,7 +17,7 @@ rem Forwards per GPU pass: empty = automatic, or 1-64
 set "BATCH="
 rem 0 = the whole PC is one worker on the pool, 1 = one worker per GPU (WORKER.gpuN)
 set "PER_GPU_WORKERS=0"
-rem speed = maximum hashrate (default), eco = fewer watts (RTX 30: about -14 % power, -6 % hashrate)
+rem speed = maximum hashrate (default), eco = fewer watts (RTX 30: about -13 % power, -2 % hashrate; faster at a power limit). RTX 40/50: same kernel in both modes
 set "MODE=speed"
 rem ================================================================
 

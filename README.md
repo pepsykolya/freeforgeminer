@@ -19,7 +19,7 @@ Every change against upstream is published in [`patches/`](patches) — includin
 | One process per GPU | HiveOS shows hashrate, temperature and shares of **every card** |
 | Integrity watchdog: every 128th batch is recomputed on the classic path and compared | An unstable GPU is reported in the log (`INTEGRITY \| ERROR`) instead of silently mining nothing |
 
-Measured on one RTX 3070 (PCIe x1), batch 32, full cycle, stock clocks: upstream 10.3 FW/s → FreeForgeMiner 16.4–16.9 FW/s (1.1.x); with the 1.2.0 fused kernel ~20 FW/s on RTX 3070 and ~30.5 FW/s on RTX 4070 Ti (pool).
+Measured on one RTX 3070 (PCIe x1), batch 32, full cycle, stock clocks: upstream 10.3 FW/s → FreeForgeMiner 16.4–16.9 FW/s (1.1.x); with 1.2.3 ~20 FW/s on RTX 3070 and ~35 FW/s on RTX 4070 Ti at ~179 W (pool).
 Results are bit-for-bit identical to upstream (verified by output hashes and by pool-accepted shares).
 
 ## Dev fee — 1 %
@@ -39,14 +39,14 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Field | Value |
 |---|---|
 | Miner name | `freeforgeminer` |
-| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.2/freeforgeminer-1.2.2.tar.gz` |
+| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.3/freeforgeminer-1.2.3.tar.gz` |
 | Hash algorithm | `forgematrix_v4` |
 | Wallet and worker template | `YOUR_64_HEX_CMFD_ADDRESS.%WORKER_NAME%` |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |
 | Extra config (optional) | `{"gpus":[0,1],"worker":"name","per_gpu_workers":false,"model_dir":"/hive/miners/custom/cmfd-model"}` |
 
 * Requires NVIDIA driver R575+ (CUDA 12.9 runtime is bundled).
-* Optional `"mode":"speed"|"eco"` in Extra config: `speed` (default) = maximum hashrate, `eco` = about 14 % less power for about 6 % less hashrate on RTX 30.
+* Optional `"mode":"speed"|"eco"` in Extra config: `speed` (default) = maximum hashrate, `eco` = RTX 30 at about 13 % less power for about 2 % less hashrate (the faster mode when the card runs at its power limit). RTX 40/50 run the same kernel in both modes.
 * The model is reused from `/hive/miners/custom/cmfd-model` when present (hash-verified), otherwise downloaded once
   from the official Common Foundry CDN.
 * The whole rig is **one worker** on the pool (the pool adds up all cards); HiveOS still shows every card separately.
@@ -59,7 +59,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 ## Windows 10/11
 
 Native Windows build (no WSL, no CUDA or Python to install — only the NVIDIA driver):
-download `freeforgeminer-1.2.2-windows-x64.zip` from the [release page](https://github.com/pepsykolya/freeforgeminer/releases/tag/v1.2.2),
+download `freeforgeminer-1.2.3-windows-x64.zip` from the [release page](https://github.com/pepsykolya/freeforgeminer/releases/tag/v1.2.3),
 unpack to e.g. `C:\FreeForgeMiner`, edit `WALLET` / `POOL` / `WORKER` in `start.bat`, run it.
 Step by step: [MANUAL.md section 12](MANUAL.md#12-windows-1011).
 
@@ -85,6 +85,7 @@ HiveOS: Custom miner, ссылка на релиз выше, мощность в
 
 ## Changelog
 
+* **1.2.3** - faster GPU kernel, new persistent kernel (`eco`, RTX 40/50), pipelined pool mining (the GPU never waits for the pool; on pools with frequent shares it stood idle 13-20 % of the time). RTX 3070: speed 20.3 FW/s @ 179 W, eco 19.9 FW/s @ 156 W; RTX 4070 Ti: 35.1 FW/s @ 179 W on the pool. Hashrate in the log over wall time. Output bit-identical.
 * **1.2.2** - GPU kernel tile configuration is picked automatically per GPU; new `speed` (default) / `eco` modes (RTX 3070: 19.6 FW/s @ 166 W vs 18.3 FW/s @ 143 W). Output bit-identical. Windows: default pool Aria.
 * **1.2.1** - the miner no longer keeps one CPU core at 100 % per GPU while waiting for the GPU (CUDA blocking sync): on rigs with small CPUs (e.g. 4-core i5 with 6–8 GPUs) CPU load and temperature drop sharply. Hashrate and results unchanged.
 * **1.2.0** - new fused GEMM+reduce GPU kernel (int8 tensor cores, layer reduce in registers): RTX 3070 14.9 -> 20.0 FW/s (+34 %), RTX 4070 Ti 26.1 -> 32.4 FW/s (+24 %) in the GPU benchmark; on the pool 4070 Ti 25.6 -> 30.5 FW/s. Bit-exact with the reference (determinism and digest checks), uses ~4x less GPU memory. Works on RTX 30/40/50 (sm_80+); older GPUs use the previous path. `CMFD_FUSED=-1` restores the old kernel.

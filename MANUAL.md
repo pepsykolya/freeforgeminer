@@ -19,7 +19,7 @@ FreeForgeMiner switches them to the Ampere path and computes the final BLAKE3 di
 | GPU series | What FreeForgeMiner adds | Status |
 |---|---|---|
 | RTX 30xx (Ampere, sm_86) | Ampere Tensor Core path + GPU digest + fused GEMM+reduce kernel (1.2.0) | **main target, tested: ~20 FW/s on RTX 3070** |
-| RTX 40xx (Ada, sm_89) | GPU digest + fused GEMM+reduce kernel (1.2.0) | tested on RTX 4070 Ti: ~30.5 FW/s on the pool (32.4 in GPU benchmark) |
+| RTX 40xx (Ada, sm_89) | GPU digest + fused GEMM+reduce kernel (1.2.0) | tested on RTX 4070 Ti: ~35 FW/s on the pool at ~179 W (core lock 2100 MHz, 190 W limit), ~43 FW/s at stock power |
 | RTX 20xx (Turing), RTX 50xx (Blackwell), Volta, Hopper | GPU digest | built, not yet tested by us |
 
 ### 2. Measured performance
@@ -98,10 +98,10 @@ All rigs behind the same IP are affected. Rejected shares almost always mean an 
 | `worker` | worker name on the pool (default: from the wallet template or the rig name) |
 | `per_gpu_workers` | `true` = each card is a separate worker `rig.gpuN` on the pool; default `false` = one worker per rig |
 | `model_dir` | where the 6.4 GB model lives (default `/hive/miners/custom/cmfd-model`, shared with other CMFD miners) |
-| `mode` | `"speed"` (default) or `"eco"`. The GPU worker picks its kernel tile configuration per card automatically; `eco` trades ~6 % hashrate for ~14 % less power. Measured on RTX 3070 (core lock 1560, +175, memory stock, pool): speed 19.6 FW/s @ 166 W, eco 18.3 FW/s @ 143 W (11.8 vs 12.8 FW/s per 100 W). On RTX 40/50 `eco` is not measured separately |
+| `mode` | `"speed"` (default) or `"eco"`. The GPU worker picks its kernel per card automatically. RTX 30: `eco` runs a persistent large-tile kernel that moves less data: RTX 3070 (core lock 1560, +175, memory stock, pool) speed 20.3 FW/s @ 179 W, eco 19.9 FW/s @ 156 W; under a power limit `eco` is the faster one. RTX 40/50: both modes run the same (fastest and most efficient) kernel |
 | `batch` | forwards per GPU pass, 1–64. Omit = automatic: 64 on 11 GB+ cards, 32 on 8 GB cards. Measured on RTX 4070 Ti: 4→23.2, 32→23.9, 64→24.1 FW/s (GPU time); on RTX 3070 the difference is within 1 % |
 
-### 7. Overclocking (RTX 30)
+### 7. Overclocking (RTX 30 / RTX 40)
 
 The Tensor Core path loads the GPU much harder than older miners. A profile that is stable elsewhere can make the GPU
 **return wrong results silently** — the miner then finds no valid shares or the pool rejects them.
@@ -120,6 +120,29 @@ The Tensor Core path loads the GPU much harder than older miners. A profile that
   | 1.2.2 `speed` (default) | 19.6 | 166 W | 11.8 |
   | 1.2.2 `eco` | 18.3 | 143 W | 12.8 |
 
+* **1.2.3, RTX 3070** (core lock 1560 MHz, offset +175, memory stock, pool mining, hashrate over wall time):
+
+  | Mode | FW/s | Power | FW/s per 100 W |
+  |---|---|---|---|
+  | `speed` (default) | 20.3 | 179 W | 11.3 |
+  | `eco` | 19.9 | 156 W | 12.8 |
+
+  **When the card runs at its power limit, choose `eco`:** it moves less data, so the GPU holds a higher clock in the same watts. Stock clocks, GPU benchmark: limit 135 W → eco +15 %, 170 W → +1 %, 220 W → equal.
+* **1.2.3, RTX 4070 Ti** (both modes use the same kernel; GPU benchmark, 1-minute runs, every result verified):
+
+  | Profile | FW/s | Power | FW/s per 100 W |
+  |---|---|---|---|
+  | stock, power limit 285 W | 42.9 | 284 W | 15.1 |
+  | **core lock 2400 MHz, power limit 220 W** | **39.5** | **199 W** | **19.9** |
+  | power limit 220 W, no lock | 39.4 | 220 W | 17.9 |
+  | **core lock 2250 MHz, power limit 190 W** | **37.3** | **188 W** | **19.9** |
+  | power limit 190 W, no lock | 36.9 | 190 W | 19.4 |
+  | core lock 2100 MHz, +150, power limit 190 W (pool: 35.1 FW/s @ 179 W) | 34.8 | 177 W | 19.7 |
+
+  * Lock the core clock (HiveOS: *Lock core clock*; Linux: `nvidia-smi -lgc 2250,2250`) and set the power limit a little above what the card draws at that clock: faster and more efficient than a power limit alone.
+  * With a locked clock the core offset (+150…+300) changes nothing. The memory offset (−1000…+2000) does not change the hashrate on RTX 40 (large L2 cache): leave memory at stock.
+  * Do not lock 2600 MHz: the clock holds, but the hashrate falls to ~25 FW/s.
+  * These were short runs: confirm your profile with an hour of mining (`INTEGRITY | ok`, no `SHARE REJECTED`).
 * **Do NOT lock the memory clock low for CMFD:** with memory at 810 MHz (a common Pearl/NOID profile) any CMFD miner drops to ~3.5 FW/s on an RTX 3070 — CMFD needs memory at stock.
 * **A core offset that is stable for other coins can be unstable for CMFD:** on one of our RTX 3070 +225 produced wrong results (`INTEGRITY ERROR`) while +175 was stable.
 * Stock clocks are always safe (~16.5 FW/s, ~250 W per RTX 3070).
@@ -174,8 +197,8 @@ Run one process per GPU (`--gpu N`). The first run needs the model and the launc
 Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed
 (tested on driver 572.70, RTX 4070 Laptop: ~20 FW/s, bit-exact with the Linux build).
 
-1. Download **`freeforgeminer-1.2.2-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.2/freeforgeminer-1.2.2-windows-x64.zip`
+1. Download **`freeforgeminer-1.2.3-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.3/freeforgeminer-1.2.3-windows-x64.zip`
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForgeMiner`.
 3. Right-click **`start.bat`** → *Edit* and set:
 
@@ -204,6 +227,7 @@ Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDI
 
 ### Changelog
 
+* **1.2.3** - faster GPU kernel (about half the instructions in the main loop and the epilogue) and a new persistent kernel for `eco` and for RTX 40/50. Pipelined pool mining: the GPU no longer waits while the pool verifies a share, every share of a batch is sent and no nonce is searched twice (on a pool with frequent shares the GPU stood idle 13-20 % of the time). The hashrate in the log is now measured over wall time. RTX 3070 (1560 MHz, +175, pool): speed 20.3 FW/s @ 179 W, eco 19.9 FW/s @ 156 W. RTX 4070 Ti (2100 MHz, +150, 190 W, pool): 35.1 FW/s @ 179 W (1.2.2: 30.6 FW/s @ 190 W in the GPU benchmark). Output bit-identical to the reference. New RTX 4070 Ti overclocking table (section 7).
 * **1.2.2** - the GPU worker picks its kernel tile configuration automatically per GPU from the L2 cache size: RTX 30 (small L2) get a better rasterization (`speed`, default) or 128x256 tiles (`eco`); RTX 40/50 keep the RTX 4070 Ti configuration. New `mode` (`speed`|`eco`; env `CMFD_MODE`, Extra config `"mode"`, `MODE` in Windows `start.bat`). RTX 3070: 1.2.1 19.8 FW/s @ 172 W; 1.2.2 speed 19.6 FW/s @ 166 W; eco 18.3 FW/s @ 143 W. Output bit-identical to the reference. Windows `start.bat`: default pool is now Aria. `CMFD_FUSED=<n>` still overrides the choice. Log line: `fused_config=N mode=... l2_mb=...`.
 * **1.2.1** - the miner no longer keeps one CPU core at 100 % per GPU while waiting for the GPU (CUDA blocking sync): on rigs with small CPUs (e.g. 4-core i5 with 6–8 GPUs) CPU load and temperature drop sharply. Hashrate and results unchanged.
 * **1.2.0 Windows** - native Windows 10/11 x64 build of 1.2.0 (no WSL): `start.bat` launcher, one process per GPU, automatic model download and restart. Same code and results as the Linux build.
@@ -226,7 +250,7 @@ FreeForgeMiner — майнер с открытым кодом для **Common F
 | Серия | Что даёт FreeForgeMiner | Статус |
 |---|---|---|
 | RTX 30xx (Ampere) | путь Ampere на тензорных ядрах + хеш на GPU + объединённое ядро GEMM+reduce (1.2.0) | **основная цель, проверено: ~20 FW/s на RTX 3070** |
-| RTX 40xx (Ada) | хеш на GPU + объединённое ядро GEMM+reduce (1.2.0) | проверено на RTX 4070 Ti: ~30,5 FW/s на пуле (32,4 в тесте GPU) |
+| RTX 40xx (Ada) | хеш на GPU + объединённое ядро GEMM+reduce (1.2.0) | проверено на RTX 4070 Ti: ~35 FW/s на пуле при ~179 Вт (фиксация ядра 2100 МГц, лимит 190 Вт), ~43 FW/s на стоковом лимите |
 | RTX 20xx, RTX 50xx, Volta, Hopper | хеш на GPU | собрано, нами пока не проверялось |
 
 ### 2. Измеренная производительность
@@ -303,10 +327,10 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 | `worker` | имя воркера на пуле (по умолчанию — из шаблона кошелька или имя рига) |
 | `per_gpu_workers` | `true` — каждая карта отдельным воркером `rig.gpuN` на пуле; по умолчанию `false` — один воркер на риг |
 | `model_dir` | где лежит модель 6,4 ГБ (по умолчанию `/hive/miners/custom/cmfd-model`, общая с другими CMFD-майнерами) |
-| `mode` | `"speed"` (по умолчанию) или `"eco"`. Воркер сам выбирает конфигурацию тайлов ядра под каждую карту; `eco` меняет ~6 % хешрейта на ~14 % меньше мощности. Замер на RTX 3070 (фиксация 1560, +175, память сток, пул): speed 19,6 FW/s @ 166 Вт, eco 18,3 FW/s @ 143 Вт (11,8 против 12,8 FW/s на 100 Вт). На RTX 40/50 `eco` отдельно не измерялся |
+| `mode` | `"speed"` (по умолчанию) или `"eco"`. Воркер сам выбирает ядро под каждую карту. RTX 30: `eco` — persistent-ядро с крупными тайлами, гоняет меньше данных: RTX 3070 (фиксация 1560, +175, память сток, пул) speed 20,3 FW/s @ 179 Вт, eco 19,9 FW/s @ 156 Вт; при упоре в лимит мощности `eco` быстрее. RTX 40/50: оба режима используют одно ядро (самое быстрое и экономное) |
 | `batch` | проходов на карту за раз, 1–64. Не указан — автоматически: 64 для карт от 11 ГБ, 32 для 8 ГБ. Замер на RTX 4070 Ti: 4→23,2, 32→23,9, 64→24,1 FW/s (время GPU); на RTX 3070 разница в пределах 1 % |
 
-### 7. Разгон (RTX 30)
+### 7. Разгон (RTX 30 / RTX 40)
 
 Путь тензорных ядер нагружает карту сильнее, чем старые майнеры. Профиль, стабильный в другом майнере, может заставить
 карту **молча считать неправильно** — тогда майнер не находит верных шар или пул их отклоняет.
@@ -325,6 +349,29 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
   | 1.2.2 `speed` (по умолчанию) | 19,6 | 166 Вт | 11,8 |
   | 1.2.2 `eco` | 18,3 | 143 Вт | 12,8 |
 
+* **1.2.3, RTX 3070** (фиксация ядра 1560 МГц, смещение +175, память сток, майнинг на пуле, хешрейт по реальному времени):
+
+  | Режим | FW/s | Мощность | FW/s на 100 Вт |
+  |---|---|---|---|
+  | `speed` (по умолчанию) | 20,3 | 179 Вт | 11,3 |
+  | `eco` | 19,9 | 156 Вт | 12,8 |
+
+  **Если карта упирается в лимит мощности, выбирайте `eco`:** он гоняет меньше данных, и на тех же ваттах GPU держит более высокую частоту. Сток, тест GPU: лимит 135 Вт → eco +15 %, 170 Вт → +1 %, 220 Вт → вровень.
+* **1.2.3, RTX 4070 Ti** (оба режима используют одно ядро; тест GPU, прогоны по минуте, каждый результат проверен):
+
+  | Профиль | FW/s | Мощность | FW/s на 100 Вт |
+  |---|---|---|---|
+  | сток, лимит мощности 285 Вт | 42,9 | 284 Вт | 15,1 |
+  | **фиксация ядра 2400 МГц, лимит 220 Вт** | **39,5** | **199 Вт** | **19,9** |
+  | лимит 220 Вт без фиксации | 39,4 | 220 Вт | 17,9 |
+  | **фиксация ядра 2250 МГц, лимит 190 Вт** | **37,3** | **188 Вт** | **19,9** |
+  | лимит 190 Вт без фиксации | 36,9 | 190 Вт | 19,4 |
+  | фиксация 2100 МГц, +150, лимит 190 Вт (пул: 35,1 FW/s @ 179 Вт) | 34,8 | 177 Вт | 19,7 |
+
+  * Фиксируйте частоту ядра (HiveOS: *Lock core clock*; Linux: `nvidia-smi -lgc 2250,2250`) и ставьте лимит мощности чуть выше того, что карта берёт на этой частоте: так быстрее и экономнее, чем одним лимитом.
+  * При фиксированной частоте смещение ядра (+150…+300) ничего не меняет. Смещение памяти (−1000…+2000) на RTX 40 (большой кэш L2) на хешрейт не влияет: память оставьте на стоке.
+  * Не фиксируйте 2600 МГц: частота держится, а хешрейт падает до ~25 FW/s.
+  * Прогоны были короткими: подтвердите свой профиль часом майнинга (`INTEGRITY | ok`, нет `SHARE REJECTED`).
 * **НЕ занижайте частоту памяти для CMFD:** при памяти 810 МГц (частый профиль Pearl/NOID) любой CMFD-майнер на RTX 3070 падает до ~3,5 FW/s — CMFD нужна память на стоке.
 * **Смещение ядра, стабильное для других монет, может быть нестабильным для CMFD:** на одной из наших RTX 3070 +225 давало неверные результаты (`INTEGRITY ERROR`), а +175 было стабильным.
 * Сток безопасен всегда (~16,5 FW/s, ~250 Вт на RTX 3070).
@@ -379,8 +426,8 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 Нативная сборка под Windows — без WSL, без установки CUDA и Python. Нужен только драйвер NVIDIA
 (проверено на драйвере 572.70, RTX 4070 Laptop: ~20 FW/s, результат побитово как у Linux-сборки).
 
-1. Скачайте **`freeforgeminer-1.2.2-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.2/freeforgeminer-1.2.2-windows-x64.zip`
+1. Скачайте **`freeforgeminer-1.2.3-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.3/freeforgeminer-1.2.3-windows-x64.zip`
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForgeMiner`.
 3. Правой кнопкой по **`start.bat`** → *Изменить* и задайте:
 
@@ -408,6 +455,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 
 ### Список изменений
 
+* **1.2.3** - ускоренное ядро GPU (примерно вдвое меньше инструкций в основном цикле и эпилоге) и новое persistent-ядро для `eco` и для RTX 40/50. Конвейерный майнинг на пуле: GPU больше не ждёт, пока пул проверяет шару, отправляются все шары батча и ни один нонс не считается дважды (на пуле с частыми шарами GPU простаивал 13–20 % времени). Хешрейт в логе теперь считается по реальному времени. RTX 3070 (1560 МГц, +175, пул): speed 20,3 FW/s @ 179 Вт, eco 19,9 FW/s @ 156 Вт. RTX 4070 Ti (2100 МГц, +150, 190 Вт, пул): 35,1 FW/s @ 179 Вт (1.2.2: 30,6 FW/s @ 190 Вт в тесте GPU). Результат побитово совпадает с эталоном. Новая таблица разгона RTX 4070 Ti (раздел 7).
 * **1.2.2** - GPU-воркер сам выбирает конфигурацию тайлов ядра под каждую карту по размеру кэша L2: RTX 30 (малый L2) получают лучшую растеризацию (`speed`, по умолчанию) или тайлы 128x256 (`eco`); RTX 40/50 сохраняют конфигурацию RTX 4070 Ti. Новый параметр `mode` (`speed`|`eco`; переменная `CMFD_MODE`, Extra config `"mode"`, `MODE` в Windows `start.bat`). RTX 3070: 1.2.1 19,8 FW/s @ 172 Вт; 1.2.2 speed 19,6 FW/s @ 166 Вт; eco 18,3 FW/s @ 143 Вт. Результат побитово совпадает с эталоном. Windows `start.bat`: пул по умолчанию теперь Aria. `CMFD_FUSED=<n>` по-прежнему переопределяет выбор. Строка в логе: `fused_config=N mode=... l2_mb=...`.
 * **1.2.1** - майнер больше не держит по ядру процессора на 100 % на каждую видеокарту, пока ждёт GPU (блокирующее ожидание CUDA): на ригах со слабым процессором (например, 4-ядерный i5 и 6–8 карт) нагрузка и температура CPU резко падают. Хешрейт и результаты не меняются.
 * **1.2.0 Windows** - нативная сборка 1.2.0 под Windows 10/11 x64 (без WSL): запуск через `start.bat`, процесс на каждую карту, автоматическая загрузка модели и перезапуск. Код и результаты те же, что у Linux-сборки.
@@ -430,7 +478,7 @@ FreeForgeMiner 将其切换为 Ampere 路径，并在 GPU 上计算最终的 BLA
 | 显卡系列 | FreeForgeMiner 的改进 | 状态 |
 |---|---|---|
 | RTX 30xx (Ampere, sm_86) | Ampere Tensor Core 路径 + GPU 摘要 + 融合 GEMM+reduce 内核 (1.2.0) | **主要目标，已测试：RTX 3070 约 20 FW/s** |
-| RTX 40xx (Ada, sm_89) | GPU 摘要 + 融合 GEMM+reduce 内核 (1.2.0) | 已在 RTX 4070 Ti 上测试：矿池上约 30.5 FW/s（GPU 基准测试 32.4） |
+| RTX 40xx (Ada, sm_89) | GPU 摘要 + 融合 GEMM+reduce 内核 (1.2.0) | 已在 RTX 4070 Ti 上测试：矿池上约 35 FW/s，约 179 W（核心锁频 2100 MHz，功耗上限 190 W），默认功耗约 43 FW/s |
 | RTX 20xx (Turing), RTX 50xx (Blackwell), Volta, Hopper | GPU 摘要 | 已编译，我们尚未测试 |
 
 ### 2. 实测性能
@@ -509,10 +557,10 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 | `worker` | 矿池上的矿工名（默认：取自钱包模板或矿机名称） |
 | `per_gpu_workers` | `true` = 每块显卡在矿池上是独立的矿工 `rig.gpuN`；默认 `false` = 每台矿机一个矿工 |
 | `model_dir` | 6.4 GB 模型的存放位置（默认 `/hive/miners/custom/cmfd-model`，与其他 CMFD 矿工共享） |
-| `mode` | `"speed"`（默认）或 `"eco"`。GPU 工作进程会按显卡自动选择内核分块配置；`eco` 用约 6 % 的算力换取约 14 % 的功耗下降。RTX 3070 实测（核心锁频 1560，+175，显存默认，矿池）：speed 19.6 FW/s @ 166 W，eco 18.3 FW/s @ 143 W（每 100 W 11.8 对 12.8 FW/s）。RTX 40/50 上 `eco` 未单独测量 |
+| `mode` | `"speed"`（默认）或 `"eco"`。GPU 工作进程按显卡自动选择内核。RTX 30：`eco` 使用数据搬运更少的常驻大分块内核：RTX 3070（核心锁频 1560，+175，显存默认，矿池）speed 20.3 FW/s @ 179 W，eco 19.9 FW/s @ 156 W；在功耗上限受限时 `eco` 更快。RTX 40/50：两种模式使用同一个（最快且最省电的）内核 |
 | `batch` | 每次 GPU 运行的前向计算数，1–64。省略 = 自动：11 GB 以上显卡为 64，8 GB 显卡为 32。在 RTX 4070 Ti 上实测：4→23.2，32→23.9，64→24.1 FW/s（GPU 时间）；在 RTX 3070 上差异在 1 % 以内 |
 
-### 7. 超频（RTX 30）
+### 7. 超频（RTX 30 / RTX 40）
 
 Tensor Core 路径对 GPU 的负载远高于旧式矿工。在其他场景下稳定的参数，在这里可能导致 GPU
 **悄悄返回错误结果**——此时矿工找不到有效份额，或矿池拒绝这些份额。
@@ -531,6 +579,29 @@ Tensor Core 路径对 GPU 的负载远高于旧式矿工。在其他场景下稳
   | 1.2.2 `speed`（默认） | 19.6 | 166 W | 11.8 |
   | 1.2.2 `eco` | 18.3 | 143 W | 12.8 |
 
+* **1.2.3，RTX 3070**（核心锁频 1560 MHz，偏移 +175，显存默认，矿池挖矿，按实际时间计算算力）：
+
+  | 模式 | FW/s | 功耗 | 每 100 W 的 FW/s |
+  |---|---|---|---|
+  | `speed`（默认） | 20.3 | 179 W | 11.3 |
+  | `eco` | 19.9 | 156 W | 12.8 |
+
+  **当显卡受功耗上限限制时，请选择 `eco`：** 它搬运的数据更少，同样功耗下 GPU 能保持更高频率。默认频率，GPU 基准测试：上限 135 W → eco +15 %，170 W → +1 %，220 W → 持平。
+* **1.2.3，RTX 4070 Ti**（两种模式使用同一个内核；GPU 基准测试，每项 1 分钟，所有结果均已校验）：
+
+  | 配置 | FW/s | 功耗 | 每 100 W 的 FW/s |
+  |---|---|---|---|
+  | 默认，功耗上限 285 W | 42.9 | 284 W | 15.1 |
+  | **核心锁频 2400 MHz，功耗上限 220 W** | **39.5** | **199 W** | **19.9** |
+  | 功耗上限 220 W，不锁频 | 39.4 | 220 W | 17.9 |
+  | **核心锁频 2250 MHz，功耗上限 190 W** | **37.3** | **188 W** | **19.9** |
+  | 功耗上限 190 W，不锁频 | 36.9 | 190 W | 19.4 |
+  | 锁频 2100 MHz，+150，上限 190 W（矿池：35.1 FW/s @ 179 W） | 34.8 | 177 W | 19.7 |
+
+  * 锁定核心频率（HiveOS：*Lock core clock*；Linux：`nvidia-smi -lgc 2250,2250`），并把功耗上限设得略高于该频率下的实际功耗：比只设功耗上限更快、更省电。
+  * 锁频后核心偏移（+150…+300）没有任何作用。RTX 40（L2 缓存大）上显存偏移（−1000…+2000）不影响算力：显存保持默认即可。
+  * 不要锁 2600 MHz：频率能保持，但算力会降到约 25 FW/s。
+  * 以上为短时测试：请用一小时挖矿确认你的配置（`INTEGRITY | ok`，没有 `SHARE REJECTED`）。
 * **不要为 CMFD 锁低显存频率：** 显存 810 MHz（常见的 Pearl/NOID 配置）时，任何 CMFD 矿工在 RTX 3070 上都会降到约 3.5 FW/s —— CMFD 需要默认显存频率。
 * **对其他币稳定的核心偏移，对 CMFD 可能不稳定：** 在我们的一块 RTX 3070 上，+225 产生了错误结果（`INTEGRITY ERROR`），而 +175 是稳定的。
 * 默认频率始终安全（每块 RTX 3070 约 16.5 FW/s，约 250 W）。
@@ -585,8 +656,8 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 原生 Windows 版本——无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动
 （已在驱动 572.70、RTX 4070 Laptop 上测试：约 20 FW/s，与 Linux 版本逐位一致）。
 
-1. 从发布页面下载 **`freeforgeminer-1.2.2-windows-x64.zip`**：
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.2/freeforgeminer-1.2.2-windows-x64.zip`
+1. 从发布页面下载 **`freeforgeminer-1.2.3-windows-x64.zip`**：
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.3/freeforgeminer-1.2.3-windows-x64.zip`
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForgeMiner`。
 3. 右键点击 **`start.bat`** → *编辑*，并设置：
 
@@ -613,6 +684,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 
 ### 更新日志
 
+* **1.2.3** - 更快的 GPU 内核（主循环和收尾阶段的指令约减半），以及用于 `eco` 和 RTX 40/50 的新常驻内核。矿池挖矿流水线化：矿池校验份额时 GPU 不再等待，每批的所有份额都会提交，任何 nonce 都不会重复计算（在份额频繁的矿池上，GPU 原先有 13–20 % 的时间空闲）。日志中的算力现在按实际时间计算。RTX 3070（1560 MHz，+175，矿池）：speed 20.3 FW/s @ 179 W，eco 19.9 FW/s @ 156 W。RTX 4070 Ti（2100 MHz，+150，190 W，矿池）：35.1 FW/s @ 179 W（1.2.2：GPU 基准测试 30.6 FW/s @ 190 W）。输出与参考实现逐位一致。新增 RTX 4070 Ti 超频表（第 7 节）。
 * **1.2.2** - GPU 工作进程根据 L2 缓存大小为每块 GPU 自动选择内核分块配置：RTX 30（L2 较小）使用更优的栅格化（`speed`，默认）或 128x256 分块（`eco`）；RTX 40/50 保持 RTX 4070 Ti 的配置。新增 `mode`（`speed`|`eco`；环境变量 `CMFD_MODE`，Extra config 中的 `"mode"`，Windows `start.bat` 中的 `MODE`）。RTX 3070：1.2.1 为 19.8 FW/s @ 172 W；1.2.2 speed 为 19.6 FW/s @ 166 W；eco 为 18.3 FW/s @ 143 W。输出与参考实现逐位一致。Windows `start.bat`：默认矿池改为 Aria。`CMFD_FUSED=<n>` 仍可覆盖该选择。日志行：`fused_config=N mode=... l2_mb=...`。
 * **1.2.1** - 矿工在等待 GPU 期间不再让每块 GPU 占满一个 CPU 核心 100 %（CUDA blocking sync）：在 CPU 较弱的矿机上（例如 4 核 i5 带 6–8 块 GPU），CPU 占用和温度大幅下降。算力和结果不变。
 * **1.2.0 Windows** - 1.2.0 的原生 Windows 10/11 x64 版本（无需 WSL）：`start.bat` 启动器、每块 GPU 一个进程、自动下载模型并自动重启。代码和结果与 Linux 版本相同。

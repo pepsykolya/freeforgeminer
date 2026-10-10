@@ -72,8 +72,10 @@ tar xzf freeforgeminer-{version}.tar.gz && cd freeforgeminer
 ```
 One process per GPU (`--gpu N`). Details in manual §11.
 
-### Overclocking (RTX 30)
-Lock the core clock and use a core offset, memory stock: start with **1560 MHz + offset 175**. Raise the offset in steps of 25 only while the log shows `INTEGRITY | ok` and no rejected/invalid shares. Never change clocks while the miner runs. If a card shows `INTEGRITY ERROR` or crashes, lower its offset by 50.
+### Overclocking
+**RTX 30:** lock the core clock and use a core offset, memory stock: start with **1560 MHz + offset 175**. Raise the offset in steps of 25 only while the log shows `INTEGRITY | ok` and no rejected/invalid shares. If a card shows `INTEGRITY ERROR` or crashes, lower its offset by 50. At a power limit choose `mode` `eco`.
+**RTX 40:** lock the core clock and set the power limit a little above what the card draws there, memory stock (RTX 4070 Ti: **2250 MHz + 190 W** = 37.3 FW/s, **2400 MHz + 220 W** = 39.5 FW/s). Core and memory offsets change nothing with a locked clock.
+Never change clocks while the miner runs. Full tables: manual, section 7.
 
 ### Dev fee: 1 %
 36 s per hour per GPU to `{FEE_WALLET}` on the same pool (worker `ffm-fee`). Fully visible in the source (`patches/0003-*`).
