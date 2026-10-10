@@ -12,12 +12,14 @@ import pathlib
 REPO = "https://github.com/pepsykolya/freeforgeminer"
 FEE_WALLET = "a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c"
 POOLS = [
+    ("Aria / AriaBrain", "pool.ariabrain.com/cmfd.html, largest share of the network hashrate", "3 %",
+     "cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9"),
     ("cmfd-pool.online", "community pool, PPLNS, auto-payout from 10 CMFD", "3 %",
      "cmfd+tls://109.199.124.187:29465?pin=ebe88f5e05f3a222208d551d05b6d39057b64ce8239ba7a708d487e15ac711be"),
-    ("Aria / AriaBrain", "pool.ariabrain.com/cmfd.html", "3 %",
-     "cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9"),
     ("NurseryPool", "cmfd.nurserypool.com", "1 %",
      "cmfd+tls://162.19.84.16:29445?pin=f61b1a26bebc257d95dad2e770ac15f229659ad85597f65c78293a3c1259c6a6"),
+    ("Kavatar", "kavatar.kasplay.online, our pool, PPLNS, auto-payout from 2 CMFD; temporarily offline", "1 %",
+     "cmfd+tls://188.35.20.44:29445?pin=71ab1d2e36cd20226ac16184b91dda5527126fa8b29ee1de2b6f5cd8b7028041"),
 ]
 
 

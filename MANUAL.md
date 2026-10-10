@@ -74,9 +74,10 @@ The pin is the SHA-256 of the pool's TLS certificate: the miner refuses any othe
 
 | Pool | Fee | Pool URL (copy the whole line) |
 |---|---|---|
+| **Aria / AriaBrain** (pool.ariabrain.com/cmfd.html, largest share of the network hashrate) | 3 % (`operator_fee_bps=300` in its API) | `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9` |
 | **cmfd-pool.online** (community pool, PPLNS, auto-payout from 10 CMFD) | 3 % | `cmfd+tls://109.199.124.187:29465?pin=ebe88f5e05f3a222208d551d05b6d39057b64ce8239ba7a708d487e15ac711be` |
-| **Aria / AriaBrain** (pool.ariabrain.com/cmfd.html) | 3 % (`operator_fee_bps=300` in its API) | `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9` |
 | **NurseryPool** (cmfd.nurserypool.com) | 1 % | `cmfd+tls://162.19.84.16:29445?pin=f61b1a26bebc257d95dad2e770ac15f229659ad85597f65c78293a3c1259c6a6` |
+| **Kavatar** (kavatar.kasplay.online, our pool, PPLNS, auto-payout from 2 CMFD; temporarily offline) | 1 % | `cmfd+tls://188.35.20.44:29445?pin=71ab1d2e36cd20226ac16184b91dda5527126fa8b29ee1de2b6f5cd8b7028041` |
 
 Pins and fees were checked on 2026-10-07. Verify a pin yourself:
 ```bash
@@ -265,9 +266,10 @@ Pin — это SHA-256 TLS-сертификата пула: к другому с
 
 | Пул | Комиссия | Pool URL (копировать строку целиком) |
 |---|---|---|
+| **Aria / AriaBrain** (pool.ariabrain.com/cmfd.html, самая большая доля хешрейта сети) | 3 % (`operator_fee_bps=300` в их API) | `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9` |
 | **cmfd-pool.online** (комьюнити-пул, PPLNS, автовыплата от 10 CMFD) | 3 % | `cmfd+tls://109.199.124.187:29465?pin=ebe88f5e05f3a222208d551d05b6d39057b64ce8239ba7a708d487e15ac711be` |
-| **Aria / AriaBrain** (pool.ariabrain.com/cmfd.html) | 3 % (`operator_fee_bps=300` в их API) | `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9` |
 | **NurseryPool** (cmfd.nurserypool.com) | 1 % | `cmfd+tls://162.19.84.16:29445?pin=f61b1a26bebc257d95dad2e770ac15f229659ad85597f65c78293a3c1259c6a6` |
+| **Kavatar** (kavatar.kasplay.online, наш пул, PPLNS, автовыплата от 2 CMFD; временно остановлен) | 1 % | `cmfd+tls://188.35.20.44:29445?pin=71ab1d2e36cd20226ac16184b91dda5527126fa8b29ee1de2b6f5cd8b7028041` |
 
 Pin и комиссии проверены 07.10.2026. Проверить pin самому:
 ```bash
@@ -457,9 +459,10 @@ pin 是矿池 TLS 证书的 SHA-256：矿工会拒绝连接任何其他服务器
 
 | 矿池 | 费率 | 矿池 URL（复制整行） |
 |---|---|---|
+| **Aria / AriaBrain** (pool.ariabrain.com/cmfd.html，全网算力占比最大) | 3 %（其 API 中 `operator_fee_bps=300`） | `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9` |
 | **cmfd-pool.online**（社区矿池，PPLNS，满 10 CMFD 自动支付） | 3 % | `cmfd+tls://109.199.124.187:29465?pin=ebe88f5e05f3a222208d551d05b6d39057b64ce8239ba7a708d487e15ac711be` |
-| **Aria / AriaBrain** (pool.ariabrain.com/cmfd.html) | 3 %（其 API 中 `operator_fee_bps=300`） | `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9` |
 | **NurseryPool** (cmfd.nurserypool.com) | 1 % | `cmfd+tls://162.19.84.16:29445?pin=f61b1a26bebc257d95dad2e770ac15f229659ad85597f65c78293a3c1259c6a6` |
+| **Kavatar**（kavatar.kasplay.online，我们的矿池，PPLNS，满 2 CMFD 自动支付；暂时停运） | 1 % | `cmfd+tls://188.35.20.44:29445?pin=71ab1d2e36cd20226ac16184b91dda5527126fa8b29ee1de2b6f5cd8b7028041` |
 
 pin 和费率于 2026-10-07 核实。你可以自行验证 pin：
 ```bash

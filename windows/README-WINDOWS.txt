@@ -12,9 +12,10 @@ Needs only the NVIDIA driver (no CUDA, no Python, no WSL). The model needs ~6.7 
 on 8 GB cards close programs that use the GPU, otherwise the hashrate will be very low.
 
 POOLS (copy one line into POOL)
-cmfd-pool.online (3 %):  cmfd+tls://109.199.124.187:29465?pin=ebe88f5e05f3a222208d551d05b6d39057b64ce8239ba7a708d487e15ac711be
 Aria / AriaBrain (3 %):  cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9
+cmfd-pool.online (3 %):  cmfd+tls://109.199.124.187:29465?pin=ebe88f5e05f3a222208d551d05b6d39057b64ce8239ba7a708d487e15ac711be
 NurseryPool (1 %):       cmfd+tls://162.19.84.16:29445?pin=f61b1a26bebc257d95dad2e770ac15f229659ad85597f65c78293a3c1259c6a6
+Kavatar (1 %, our pool, temporarily offline): cmfd+tls://188.35.20.44:29445?pin=71ab1d2e36cd20226ac16184b91dda5527126fa8b29ee1de2b6f5cd8b7028041
 
 DEV FEE 1 %: 36 s per hour per GPU to a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c
 on the same pool (worker ffm-fee). Open source (MIT): https://github.com/pepsykolya/freeforgeminer
