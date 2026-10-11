@@ -90,7 +90,7 @@ All rigs behind the same IP are affected. Rejected shares almost always mean an 
 ### 6. Extra config (optional JSON)
 
 ```json
-{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "batch":64, "model_dir":"/hive/miners/custom/cmfd-model"}
+{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "batch":64, "mode":"eco", "model_dir":"/hive/miners/custom/cmfd-model"}
 ```
 | Key | Meaning |
 |---|---|
@@ -191,6 +191,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
   --production-v4-scratch /tmp/ffm-gpu0 --stats-seconds 5
 ```
 Run one process per GPU (`--gpu N`). The first run needs the model and the launch files (`production-mainnet/`) from the archive.
+Eco mode: start the command with `CMFD_MODE=eco ./cmfd-miner pool ...` (default `speed`).
 
 ### 12. Windows 10/11
 
@@ -210,7 +211,7 @@ Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDI
 | `GPUS` | empty = all NVIDIA GPUs, or a list like `0,1` (indexes from `nvidia-smi`) |
 | `BATCH` | empty = automatic, or 1-64 |
 | `PER_GPU_WORKERS` | `0` = the PC is one worker on the pool, `1` = one worker per GPU |
-| `MODE` | `speed` = maximum hashrate (default), `eco` = fewer watts (RTX 30: about -14 % power, -6 % hashrate) |
+| `MODE` | `speed` = maximum hashrate (default), `eco` = fewer watts (RTX 30: about -13 % power, -2 % hashrate; the faster mode at a power limit). RTX 40/50 run the same kernel in both modes |
 
 4. Double-click **`start.bat`**. The first start downloads the 6.4 GB model once (16 parallel parts, every part
    SHA-256-verified, ~10-30 min depending on the connection). Later starts only re-check it (~1 min).
@@ -319,7 +320,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 ### 6. Extra config (необязательный JSON)
 
 ```json
-{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "batch":64, "model_dir":"/hive/miners/custom/cmfd-model"}
+{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "batch":64, "mode":"eco", "model_dir":"/hive/miners/custom/cmfd-model"}
 ```
 | Ключ | Что делает |
 |---|---|
@@ -420,6 +421,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
   --production-v4-scratch /tmp/ffm-gpu0 --stats-seconds 5
 ```
 По процессу на каждую карту (`--gpu N`). Для первого запуска нужны модель и файлы запуска сети (`production-mainnet/`) из архива.
+Режим eco: запускайте команду как `CMFD_MODE=eco ./cmfd-miner pool ...` (по умолчанию `speed`).
 
 ### 12. Windows 10/11
 
@@ -439,7 +441,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 | `GPUS` | пусто = все карты NVIDIA, или список вида `0,1` (номера из `nvidia-smi`) |
 | `BATCH` | пусто = автоматически, или 1–64 |
 | `PER_GPU_WORKERS` | `0` = весь ПК один воркер на пуле, `1` = отдельный воркер на каждую карту |
-| `MODE` | `speed` = максимальный хешрейт (по умолчанию), `eco` = меньше ватт (RTX 30: около -14 % мощности, -6 % хешрейта) |
+| `MODE` | `speed` = максимальный хешрейт (по умолчанию), `eco` = меньше ватт (RTX 30: около -13 % мощности, -2 % хешрейта; при упоре в лимит мощности быстрее). RTX 40/50: одно ядро в обоих режимах |
 
 4. Запустите **`start.bat`** двойным щелчком. При первом запуске модель 6,4 ГБ скачивается один раз (16 частей
    параллельно, каждая проверяется по SHA-256, ~10–30 минут в зависимости от интернета). Дальше при запуске она только
@@ -549,7 +551,7 @@ openssl s_client -connect 109.199.124.187:29465 </dev/null 2>/dev/null | openssl
 ### 6. 额外配置（可选 JSON）
 
 ```json
-{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "batch":64, "model_dir":"/hive/miners/custom/cmfd-model"}
+{"gpus":[0,1,2], "worker":"rig01", "per_gpu_workers":false, "batch":64, "mode":"eco", "model_dir":"/hive/miners/custom/cmfd-model"}
 ```
 | 键 | 含义 |
 |---|---|
@@ -650,6 +652,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
   --production-v4-scratch /tmp/ffm-gpu0 --stats-seconds 5
 ```
 每块 GPU 运行一个进程（`--gpu N`）。首次运行需要模型以及压缩包中的启动文件（`production-mainnet/`）。
+eco 模式：命令前加 `CMFD_MODE=eco`，即 `CMFD_MODE=eco ./cmfd-miner pool ...`（默认 `speed`）。
 
 ### 12. Windows 10/11
 
@@ -669,7 +672,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 | `GPUS` | 留空 = 所有 NVIDIA 显卡，或类似 `0,1` 的列表（编号来自 `nvidia-smi`） |
 | `BATCH` | 留空 = 自动，或 1-64 |
 | `PER_GPU_WORKERS` | `0` = 这台电脑在矿池上是一个矿工，`1` = 每块 GPU 一个矿工 |
-| `MODE` | `speed` = 最高算力（默认），`eco` = 更低功耗（RTX 30：功耗约 -14 %，算力约 -6 %） |
+| `MODE` | `speed` = 最高算力（默认），`eco` = 更低功耗（RTX 30：功耗约 -13 %，算力约 -2 %；受功耗上限限制时更快）。RTX 40/50 两种模式使用同一内核 |
 
 4. 双击 **`start.bat`**。首次启动会一次性下载 6.4 GB 模型（16 个并行分块，每个分块都经过
    SHA-256 校验，视网速约 10-30 分钟）。之后启动只需重新校验（约 1 分钟）。

@@ -43,7 +43,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Hash algorithm | `forgematrix_v4` |
 | Wallet and worker template | `YOUR_64_HEX_CMFD_ADDRESS.%WORKER_NAME%` |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |
-| Extra config (optional) | `{"gpus":[0,1],"worker":"name","per_gpu_workers":false,"model_dir":"/hive/miners/custom/cmfd-model"}` |
+| Extra config (optional) | `{"mode":"eco"}` for eco mode; all keys: `{"gpus":[0,1],"worker":"name","per_gpu_workers":false,"mode":"eco","model_dir":"/hive/miners/custom/cmfd-model"}` |
 
 * Requires NVIDIA driver R575+ (CUDA 12.9 runtime is bundled).
 * Optional `"mode":"speed"|"eco"` in Extra config: `speed` (default) = maximum hashrate, `eco` = RTX 30 at about 13 % less power for about 2 % less hashrate (the faster mode when the card runs at its power limit). RTX 40/50 run the same kernel in both modes.
