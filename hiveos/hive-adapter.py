@@ -24,13 +24,43 @@ GPU_PATTERN=re.compile(r'GPU-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12
 RATE=re.compile(r'MINER STATS \| (?:GPU \d+ \(GPU-[0-9a-fA-F-]+\) \| )?height \d+ \| hashrate ([0-9.]+) FW/s \| accepted (\d+) \| rejected (\d+) \| stale (\d+) \| blocks \d+ \| credit \d+ atoms \| power .*? \| efficiency .*? \| temp .*? \| uptime (\d+):(\d+):(\d+)')
 TIMED_RATE=re.compile(r'^([0-9]+\.[0-9]{6}) '+RATE.pattern,re.MULTILINE)
 MAX_SAMPLE_AGE=45
+BECH32_CHARSET='qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+
+
+def _bech32m_polymod(values):
+    checksum=1
+    for value in values:
+        top=checksum>>25
+        checksum=((checksum&0x1ffffff)<<5)^value
+        for index,generator in enumerate((0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3)):
+            if (top>>index)&1: checksum^=generator
+    return checksum
+
+
+def wallet_problem(text):
+    """None for a valid CMFD mainnet address (cmfd1... with a correct bech32m checksum, or 64 hex), else why not.
+    cmfd-miner checks the address again (and that it is a curve point)."""
+    if re.fullmatch(r'[0-9a-fA-F]{64}',text): return None
+    if not re.fullmatch(r'(?:cmfd1|CMFD1)[0-9A-Za-z]{58}',text):
+        if re.fullmatch(r'(?:tcmfd1|TCMFD1)[0-9A-Za-z]+',text): return 'this is a test-network address (tcmfd1...); use your mainnet cmfd1... address'
+        if re.fullmatch(r'[0-9a-fA-F]+',text): return 'a hex address has exactly 64 characters (got %d)'%len(text)
+        return 'the wallet must be your cmfd1... address (63 characters) or the 64-character hex address'
+    if text!=text.lower() and text!=text.upper(): return 'the cmfd1... address mixes upper and lower case'
+    data=text.lower()[5:]
+    if any(c not in BECH32_CHARSET for c in data): return 'the cmfd1... address contains a character that addresses never use (b, i, o or 1)'
+    hrp=[ord(c)>>5 for c in 'cmfd']+[0]+[ord(c)&31 for c in 'cmfd']
+    if _bech32m_polymod(hrp+[BECH32_CHARSET.index(c) for c in data])!=0x2bc830a3:
+        return 'the cmfd1... address checksum does not match: it is mistyped or incomplete, copy it again from your wallet'
+    if BECH32_CHARSET.index(data[51])&0xf: return 'the cmfd1... address does not hold a 32-byte key'
+    return None
 
 
 def validate_config(value,root):
     required={'wallet','pool','worker','gpus','model_dir','state_dir','per_gpu_workers','batch','mode'}
     if not isinstance(value,dict) or set(value)!=required: raise ValueError('invalid miner config')
-    if not isinstance(value['wallet'],str) or not re.fullmatch(r'[0-9a-fA-F]{64}',value['wallet']):
-        raise ValueError('wallet template must contain the 64-character destination public key')
+    if not isinstance(value['wallet'],str):raise ValueError('wallet template must contain your cmfd1... address or the 64-character hex address')
+    problem=wallet_problem(value['wallet'])
+    if problem:raise ValueError('wallet '+repr(value['wallet'])+': '+problem)
     pool=urlsplit(value['pool'])
     query=parse_qsl(pool.query,keep_blank_values=True)
     if pool.scheme!='cmfd+tls' or pool.username or pool.password or pool.path or pool.fragment:

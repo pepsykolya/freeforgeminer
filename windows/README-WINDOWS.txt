@@ -3,7 +3,7 @@ Full manual (EN/RU): https://github.com/pepsykolya/freeforgeminer/blob/main/MANU
 
 QUICK START
 1. Unpack this archive to a folder without spaces or non-English letters, e.g. C:\FreeForgeMiner
-2. Right-click start.bat -> Edit. Set WALLET (your 64-character CMFD address), POOL (one URL from the
+2. Right-click start.bat -> Edit. Set WALLET (your CMFD address: cmfd1... or 64 hex characters), POOL (one URL from the
    list below) and optionally WORKER, GPUS, BATCH. Save.
 3. Double-click start.bat. First start downloads the 6.4 GB model once (verified), then mining starts.
    Logs: logs\gpuN.log. Ctrl+C stops the miner.
@@ -25,7 +25,7 @@ FreeForgeMiner для Windows 10/11 (x64)
 
 БЫСТРЫЙ СТАРТ
 1. Распакуйте архив в папку без пробелов и русских букв, например C:\FreeForgeMiner
-2. Правой кнопкой по start.bat -> Изменить. Задайте WALLET (ваш 64-символьный CMFD-адрес), POOL (строка из
+2. Правой кнопкой по start.bat -> Изменить. Задайте WALLET (ваш CMFD-адрес: cmfd1... или 64 hex-символа), POOL (строка из
    списка пулов выше) и при желании WORKER, GPUS, BATCH. Сохраните.
 3. Запустите start.bat. При первом запуске модель 6,4 ГБ скачается один раз (с проверкой), затем начнётся майнинг.
    Логи: logs\gpuN.log. Ctrl+C - остановка.
@@ -39,7 +39,7 @@ FreeForgeMiner Windows 10/11 (x64) 版
 
 快速开始
 1. 将压缩包解压到不含空格和中文字符的文件夹，例如 C:\FreeForgeMiner
-2. 右键点击 start.bat -> 编辑。设置 WALLET（你的 64 位 CMFD 地址）、POOL（上面矿池列表中的一行），
+2. 右键点击 start.bat -> 编辑。设置 WALLET（你的 CMFD 地址：cmfd1... 或 64 位十六进制）、POOL（上面矿池列表中的一行），
    也可按需设置 WORKER、GPUS、BATCH。保存。
 3. 运行 start.bat。首次启动会一次性下载 6.4 GB 模型（带校验），随后开始挖矿。
    日志：logs\gpuN.log。Ctrl+C 停止。

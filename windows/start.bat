@@ -5,7 +5,7 @@ title FreeForgeMiner
 rem ================================================================
 rem  FreeForgeMiner for Windows - EDIT THESE VALUES
 rem ================================================================
-rem Your CMFD wallet address (64 hex characters)
+rem Your CMFD wallet address: cmfd1... (as your wallet shows it) or the 64-character hex form
 set "WALLET="
 rem Pool URL - one line from MANUAL.md section 5 (default: Aria / AriaBrain)
 set "POOL=cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9"

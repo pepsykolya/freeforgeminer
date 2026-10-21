@@ -26,6 +26,7 @@ Results are bit-for-bit identical to upstream (verified by output hashes and by 
 
 * 36 seconds out of every hour, per GPU, the miner mines to the developer wallet
   `a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c`
+  (= `cmfd156cfzkcxyzvhkfsx2arjdl8s2c5d5mwf460jladlleks5vl2nukqdnpp80`)
   on **the same pool you selected**, worker name `ffm-fee`.
 * The slot inside the hour is random for every GPU, so a rig never reconnects all cards at once.
 * The miner prints `DEV FEE | ...` when the slice starts and ends.
@@ -39,9 +40,9 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Field | Value |
 |---|---|
 | Miner name | `freeforgeminer` |
-| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.3/freeforgeminer-1.2.3.tar.gz` |
+| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.4/freeforgeminer-1.2.4.tar.gz` |
 | Hash algorithm | `forgematrix_v4` |
-| Wallet and worker template | `YOUR_64_HEX_CMFD_ADDRESS.%WORKER_NAME%` |
+| Wallet and worker template | `YOUR_CMFD_ADDRESS.%WORKER_NAME%` (`cmfd1…` or 64 hex) |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |
 | Extra config (optional) | `{"mode":"eco"}` for eco mode; all keys: `{"gpus":[0,1],"worker":"name","per_gpu_workers":false,"mode":"eco","model_dir":"/hive/miners/custom/cmfd-model"}` |
 
@@ -59,9 +60,15 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 ## Windows 10/11
 
 Native Windows build (no WSL, no CUDA or Python to install — only the NVIDIA driver):
-download `freeforgeminer-1.2.3-windows-x64.zip` from the [release page](https://github.com/pepsykolya/freeforgeminer/releases/tag/v1.2.3),
+download `freeforgeminer-1.2.4-windows-x64.zip` from the [release page](https://github.com/pepsykolya/freeforgeminer/releases/tag/v1.2.4),
 unpack to e.g. `C:\FreeForgeMiner`, edit `WALLET` / `POOL` / `WORKER` in `start.bat`, run it.
 Step by step: [MANUAL.md section 12](MANUAL.md#12-windows-1011).
+
+## Regression test
+
+`tests/upstream-1.0.16/fixture_check.py WORKER MODEL-V2.bank` replays the official Common Foundry 1.0.16 fixture
+(nonces 0-31 of a mainnet template) and requires the published output SHA-256 `fe67b80a…f4a7a7`, identical on every run,
+plus GPU BLAKE3 digests equal to BLAKE3 of that output.
 
 ## Build from source
 
@@ -85,6 +92,7 @@ HiveOS: Custom miner, ссылка на релиз выше, мощность в
 
 ## Changelog
 
+* **1.2.4** - `cmfd1…` checksummed addresses (Common Foundry 1.0.16 wallet) accepted everywhere next to 64-hex, checksum verified, clear error on a mistyped address; same account either way. Random nonce start per (re)connect: no `duplicate_share` after a restart within a block. Regression test with the official 1.0.16 fixture (`tests/`). Hashrate unchanged.
 * **1.2.3** - faster GPU kernel, new persistent kernel (`eco`, RTX 40/50), pipelined pool mining (the GPU never waits for the pool; on pools with frequent shares it stood idle 13-20 % of the time). RTX 3070: speed 20.3 FW/s @ 179 W, eco 19.9 FW/s @ 156 W; RTX 4070 Ti: 35.1 FW/s @ 179 W on the pool. Hashrate in the log over wall time. Output bit-identical.
 * **1.2.2** - GPU kernel tile configuration is picked automatically per GPU; new `speed` (default) / `eco` modes (RTX 3070: 19.6 FW/s @ 166 W vs 18.3 FW/s @ 143 W). Output bit-identical. Windows: default pool Aria.
 * **1.2.1** - the miner no longer keeps one CPU core at 100 % per GPU while waiting for the GPU (CUDA blocking sync): on rigs with small CPUs (e.g. 4-core i5 with 6–8 GPUs) CPU load and temperature drop sharply. Hashrate and results unchanged.

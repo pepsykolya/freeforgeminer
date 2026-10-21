@@ -11,6 +11,7 @@ import pathlib
 
 REPO = "https://github.com/pepsykolya/freeforgeminer"
 FEE_WALLET = "a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c"
+FEE_WALLET_CMFD = "cmfd156cfzkcxyzvhkfsx2arjdl8s2c5d5mwf460jladlleks5vl2nukqdnpp80"
 POOLS = [
     ("Aria / AriaBrain", "pool.ariabrain.com/cmfd.html, largest share of the network hashrate", "3 %",
      "cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9"),
@@ -56,7 +57,7 @@ def build(version, sha, whatsnew, windows_zip=None, windows_sha=None):
 | Pass | empty |
 | Extra config arguments | empty, or `{{"mode":"eco"}}` for eco mode; more keys (`batch`, `per_gpu_workers`, `gpus`) in manual §6 |
 
-Wallet: your CMFD address (64 hex characters), Pool: *Configure in miner*. Apply the flight sheet; the first start verifies or downloads the 6.4 GB model once. **Updating:** just change the Installation URL to the new version.
+Wallet: your CMFD address — `cmfd1…` as the 1.0.16 wallet shows it, or the 64-hex form (same account), Pool: *Configure in miner*. Apply the flight sheet; the first start verifies or downloads the 6.4 GB model once. **Updating:** just change the Installation URL to the new version.
 
 ### Speed / eco mode
 | | Default (`speed`) | How to turn on `eco` |
@@ -75,7 +76,7 @@ Wallet: your CMFD address (64 hex characters), Pool: *Configure in miner*. Apply
 ### Linux without HiveOS
 ```bash
 tar xzf freeforgeminer-{version}.tar.gz && cd freeforgeminer
-./cmfd-miner pool --pool 'cmfd+tls://IP:PORT?pin=...' --miner YOUR_ADDRESS --worker rig01 --gpu 0 \\
+./cmfd-miner pool --pool 'cmfd+tls://IP:PORT?pin=...' --miner YOUR_CMFD1_ADDRESS --worker rig01 --gpu 0 \\
   --production-v4-bank /path/to/MODEL-V2.bank --production-v4-replay-worker "$PWD/cmfd-v4-replay" \\
   --production-v4-scratch /tmp/ffm-gpu0 --stats-seconds 5
 ```
@@ -87,7 +88,7 @@ One process per GPU (`--gpu N`). Eco mode: `CMFD_MODE=eco ./cmfd-miner pool ...`
 Never change clocks while the miner runs. Full tables: manual, section 7.
 
 ### Dev fee: 1 %
-36 s per hour per GPU to `{FEE_WALLET}` on the same pool (worker `ffm-fee`). Fully visible in the source (`patches/0003-*`).
+36 s per hour per GPU to `{FEE_WALLET}` (= `{FEE_WALLET_CMFD}`) on the same pool (worker `ffm-fee`). Fully visible in the source (`patches/0003-*`).
 
 ### SHA-256
 {sums}

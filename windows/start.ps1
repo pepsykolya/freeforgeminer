@@ -22,10 +22,12 @@ if ($root -match '\s|[^\x00-\x7F]') {
     Write-Host "         If the miner fails to start, move the folder to e.g. C:\FreeForgeMiner" -ForegroundColor Yellow
 }
 if ([string]::IsNullOrWhiteSpace($Wallet)) {
-    Write-Host 'WALLET is empty. Right-click start.bat -> Edit, and set WALLET to your 64-character CMFD address.'
+    Write-Host 'WALLET is empty. Right-click start.bat -> Edit, and set WALLET to your CMFD address (cmfd1... or 64 hex characters).'
     $Wallet = (Read-Host 'Or paste the wallet address now').Trim()
 }
-if ($Wallet -cnotmatch '^[0-9a-fA-F]{64}$') { Fail 'WALLET must be exactly 64 hexadecimal characters.' }
+# cmfd-miner verifies the cmfd1... checksum and the key; this only catches the wrong kind of value.
+if ($Wallet -match '^tcmfd1') { Fail 'WALLET is a test-network address (tcmfd1...). Use your mainnet cmfd1... address.' }
+if ($Wallet -cnotmatch '^(?:[0-9a-fA-F]{64}|(?:cmfd1|CMFD1)[0-9A-Za-z]{58})$') { Fail 'WALLET must be your cmfd1... address (63 characters) or the 64-character hex address. Copy it again from your wallet.' }
 if ($Pool -cnotmatch '^cmfd\+tls://[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}\?pin=[0-9A-Fa-f]{64}$') {
     Fail 'POOL must look like cmfd+tls://IP:PORT?pin=64_HEX (see MANUAL.md, section 5).'
 }
