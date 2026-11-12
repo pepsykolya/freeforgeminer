@@ -40,7 +40,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 | Field | Value |
 |---|---|
 | Miner name | `freeforgeminer` |
-| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.4/freeforgeminer-1.2.4.tar.gz` |
+| Installation URL | `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.5/freeforgeminer-1.2.5.tar.gz` |
 | Hash algorithm | `forgematrix_v4` |
 | Wallet and worker template | `YOUR_CMFD_ADDRESS.%WORKER_NAME%` (`cmfd1…` or 64 hex) |
 | Pool URL | `cmfd+tls://IP:PORT?pin=64HEX` (numeric IPv4 + certificate pin, as published by your pool) |
@@ -60,7 +60,7 @@ Flight sheet → Miner: **Custom** → Setup Miner Config:
 ## Windows 10/11
 
 Native Windows build (no WSL, no CUDA or Python to install — only the NVIDIA driver):
-download `freeforgeminer-1.2.4-windows-x64.zip` from the [release page](https://github.com/pepsykolya/freeforgeminer/releases/tag/v1.2.4),
+download `freeforgeminer-1.2.5-windows-x64.zip` from the [release page](https://github.com/pepsykolya/freeforgeminer/releases/tag/v1.2.5),
 unpack to e.g. `C:\FreeForgeMiner`, edit `WALLET` / `POOL` / `WORKER` in `start.bat`, run it.
 Step by step: [MANUAL.md section 12](MANUAL.md#12-windows-1011).
 
@@ -92,6 +92,7 @@ HiveOS: Custom miner, ссылка на релиз выше, мощность в
 
 ## Changelog
 
+* **1.2.5** - pool client accepts the compact-proof mainnet fork's consensus fingerprint (`9009948f…`, height 67,535) next to the current one (`e9d81f15…`), exactly those two, as in the official miner 1.0.22; logs `Pool consensus fingerprint`; `cmfd-miner pool-compatibility-info`. Hashrate unchanged.
 * **1.2.4** - `cmfd1…` checksummed addresses (Common Foundry 1.0.16 wallet) accepted everywhere next to 64-hex, checksum verified, clear error on a mistyped address; same account either way. Random nonce start per (re)connect: no `duplicate_share` after a restart within a block. Regression test with the official 1.0.16 fixture (`tests/`). Hashrate unchanged.
 * **1.2.3** - faster GPU kernel, new persistent kernel (`eco`, RTX 40/50), pipelined pool mining (the GPU never waits for the pool; on pools with frequent shares it stood idle 13-20 % of the time). RTX 3070: speed 20.3 FW/s @ 179 W, eco 19.9 FW/s @ 156 W; RTX 4070 Ti: 35.1 FW/s @ 179 W on the pool. Hashrate in the log over wall time. Output bit-identical.
 * **1.2.2** - GPU kernel tile configuration is picked automatically per GPU; new `speed` (default) / `eco` modes (RTX 3070: 19.6 FW/s @ 166 W vs 18.3 FW/s @ 143 W). Output bit-identical. Windows: default pool Aria.

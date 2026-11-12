@@ -198,8 +198,8 @@ Eco mode: start the command with `CMFD_MODE=eco ./cmfd-miner pool ...` (default 
 Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed
 (tested on driver 572.70, RTX 4070 Laptop: ~20 FW/s, bit-exact with the Linux build).
 
-1. Download **`freeforgeminer-1.2.4-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.4/freeforgeminer-1.2.4-windows-x64.zip`
+1. Download **`freeforgeminer-1.2.5-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.5/freeforgeminer-1.2.5-windows-x64.zip`
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForgeMiner`.
 3. Right-click **`start.bat`** → *Edit* and set:
 
@@ -228,6 +228,7 @@ Native Windows build — no WSL, no CUDA installation, no Python. Only the NVIDI
 
 ### Changelog
 
+* **1.2.5** - the pool client also accepts the consensus fingerprint of the planned compact-proof mainnet fork (activation height 67,535, `9009948f…`) next to the current one (`e9d81f15…`), so the same miner connects to a pool before and after it upgrades. Exactly those two values on the mainnet network ID are accepted (as in the official reference miner 1.0.22); any other fingerprint is refused before anything is signed. The miner prints `Pool consensus fingerprint: …` on every connect; `cmfd-miner pool-compatibility-info` lists the accepted pins. Applies to the dev-fee session too. Mining code and hashrate unchanged.
 * **1.2.4** - accepts the checksummed `cmfd1…` addresses of the Common Foundry 1.0.16 wallet as well as the 64-hex form (HiveOS, Windows `start.bat`, `--miner`). The checksum is verified; a mistyped address is refused with a clear message instead of mining to a wrong key. The pool receives the same 32-byte key, so `cmfd1…` and hex pay the same account. The nonce search starts at a random offset on every (re)connect: a miner restarted within the same block no longer finds the same shares again (`duplicate_share`). Regression test with the official 1.0.16 fixture (byte-exact). Hashrate unchanged.
 * **1.2.3** - faster GPU kernel (about half the instructions in the main loop and the epilogue) and a new persistent kernel for `eco` and for RTX 40/50. Pipelined pool mining: the GPU no longer waits while the pool verifies a share, every share of a batch is sent and no nonce is searched twice (on a pool with frequent shares the GPU stood idle 13-20 % of the time). The hashrate in the log is now measured over wall time. RTX 3070 (1560 MHz, +175, pool): speed 20.3 FW/s @ 179 W, eco 19.9 FW/s @ 156 W. RTX 4070 Ti (2100 MHz, +150, 190 W, pool): 35.1 FW/s @ 179 W (1.2.2: 30.6 FW/s @ 190 W in the GPU benchmark). Output bit-identical to the reference. New RTX 4070 Ti overclocking table (section 7).
 * **1.2.2** - the GPU worker picks its kernel tile configuration automatically per GPU from the L2 cache size: RTX 30 (small L2) get a better rasterization (`speed`, default) or 128x256 tiles (`eco`); RTX 40/50 keep the RTX 4070 Ti configuration. New `mode` (`speed`|`eco`; env `CMFD_MODE`, Extra config `"mode"`, `MODE` in Windows `start.bat`). RTX 3070: 1.2.1 19.8 FW/s @ 172 W; 1.2.2 speed 19.6 FW/s @ 166 W; eco 18.3 FW/s @ 143 W. Output bit-identical to the reference. Windows `start.bat`: default pool is now Aria. `CMFD_FUSED=<n>` still overrides the choice. Log line: `fused_config=N mode=... l2_mb=...`.
@@ -429,8 +430,8 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 Нативная сборка под Windows — без WSL, без установки CUDA и Python. Нужен только драйвер NVIDIA
 (проверено на драйвере 572.70, RTX 4070 Laptop: ~20 FW/s, результат побитово как у Linux-сборки).
 
-1. Скачайте **`freeforgeminer-1.2.4-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.4/freeforgeminer-1.2.4-windows-x64.zip`
+1. Скачайте **`freeforgeminer-1.2.5-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.5/freeforgeminer-1.2.5-windows-x64.zip`
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForgeMiner`.
 3. Правой кнопкой по **`start.bat`** → *Изменить* и задайте:
 
@@ -458,6 +459,7 @@ tar xzf freeforgeminer-X.Y.Z.tar.gz && cd freeforgeminer
 
 ### Список изменений
 
+* **1.2.5** - пул-клиент принимает и consensus fingerprint планируемого форка mainnet со сжатыми доказательствами (высота активации 67 535, `9009948f…`) наравне с текущим (`e9d81f15…`): один и тот же майнер подключается к пулу и до, и после его обновления. Принимаются ровно эти два значения на сетевом ID mainnet (как в официальном эталонном майнере 1.0.22); любой другой fingerprint отклоняется до подписи. Майнер печатает `Pool consensus fingerprint: …` при каждом подключении; `cmfd-miner pool-compatibility-info` показывает принимаемые значения. Действует и для сессии комиссии. Код майнинга и хешрейт без изменений.
 * **1.2.4** - принимает адреса `cmfd1…` с контрольной суммой из кошелька Common Foundry 1.0.16 наравне со старым 64-hex (HiveOS, Windows `start.bat`, `--miner`). Контрольная сумма проверяется: адрес с опечаткой отклоняется с понятным сообщением, а не майнит на чужой ключ. Пул получает тот же 32-байтный ключ, поэтому `cmfd1…` и hex — один и тот же счёт. Перебор нонсов начинается со случайного смещения при каждом (пере)подключении: майнер, перезапущенный в том же блоке, больше не находит те же шары повторно (`duplicate_share`). Регресс-тест на официальной фикстуре 1.0.16 (побайтно). Хешрейт без изменений.
 * **1.2.3** - ускоренное ядро GPU (примерно вдвое меньше инструкций в основном цикле и эпилоге) и новое persistent-ядро для `eco` и для RTX 40/50. Конвейерный майнинг на пуле: GPU больше не ждёт, пока пул проверяет шару, отправляются все шары батча и ни один нонс не считается дважды (на пуле с частыми шарами GPU простаивал 13–20 % времени). Хешрейт в логе теперь считается по реальному времени. RTX 3070 (1560 МГц, +175, пул): speed 20,3 FW/s @ 179 Вт, eco 19,9 FW/s @ 156 Вт. RTX 4070 Ti (2100 МГц, +150, 190 Вт, пул): 35,1 FW/s @ 179 Вт (1.2.2: 30,6 FW/s @ 190 Вт в тесте GPU). Результат побитово совпадает с эталоном. Новая таблица разгона RTX 4070 Ti (раздел 7).
 * **1.2.2** - GPU-воркер сам выбирает конфигурацию тайлов ядра под каждую карту по размеру кэша L2: RTX 30 (малый L2) получают лучшую растеризацию (`speed`, по умолчанию) или тайлы 128x256 (`eco`); RTX 40/50 сохраняют конфигурацию RTX 4070 Ti. Новый параметр `mode` (`speed`|`eco`; переменная `CMFD_MODE`, Extra config `"mode"`, `MODE` в Windows `start.bat`). RTX 3070: 1.2.1 19,8 FW/s @ 172 Вт; 1.2.2 speed 19,6 FW/s @ 166 Вт; eco 18,3 FW/s @ 143 Вт. Результат побитово совпадает с эталоном. Windows `start.bat`: пул по умолчанию теперь Aria. `CMFD_FUSED=<n>` по-прежнему переопределяет выбор. Строка в логе: `fused_config=N mode=... l2_mb=...`.
@@ -661,8 +663,8 @@ eco 模式：命令前加 `CMFD_MODE=eco`，即 `CMFD_MODE=eco ./cmfd-miner pool
 原生 Windows 版本——无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动
 （已在驱动 572.70、RTX 4070 Laptop 上测试：约 20 FW/s，与 Linux 版本逐位一致）。
 
-1. 从发布页面下载 **`freeforgeminer-1.2.4-windows-x64.zip`**：
-   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.4/freeforgeminer-1.2.4-windows-x64.zip`
+1. 从发布页面下载 **`freeforgeminer-1.2.5-windows-x64.zip`**：
+   `https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.5/freeforgeminer-1.2.5-windows-x64.zip`
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForgeMiner`。
 3. 右键点击 **`start.bat`** → *编辑*，并设置：
 
@@ -689,6 +691,7 @@ eco 模式：命令前加 `CMFD_MODE=eco`，即 `CMFD_MODE=eco ./cmfd-miner pool
 
 ### 更新日志
 
+* **1.2.5** - 矿池客户端除当前的 consensus fingerprint（`e9d81f15…`）外，也接受计划中的压缩证明主网分叉（激活高度 67,535，`9009948f…`）的指纹，因此同一个矿工在矿池升级前后都能连接。仅接受主网网络 ID 上的这两个值（与官方参考矿工 1.0.22 一致），其他指纹在签名之前即被拒绝。每次连接时矿工会打印 `Pool consensus fingerprint: …`；`cmfd-miner pool-compatibility-info` 列出可接受的值。开发者费用会话同样适用。挖矿代码和算力不变。
 * **1.2.4** - 支持 Common Foundry 1.0.16 钱包显示的带校验和的 `cmfd1…` 地址，同时兼容旧的 64 位十六进制格式（HiveOS、Windows `start.bat`、`--miner`）。会校验校验和：输错的地址会被拒绝并给出明确提示，而不会挖到错误的密钥。矿池收到的是同一个 32 字节密钥，因此 `cmfd1…` 与十六进制格式对应同一账户。每次（重新）连接时 nonce 搜索从随机偏移开始：在同一区块内重启的矿工不会再次找到相同的份额（`duplicate_share`）。使用官方 1.0.16 测试数据做回归测试（逐字节一致）。算力不变。
 * **1.2.3** - 更快的 GPU 内核（主循环和收尾阶段的指令约减半），以及用于 `eco` 和 RTX 40/50 的新常驻内核。矿池挖矿流水线化：矿池校验份额时 GPU 不再等待，每批的所有份额都会提交，任何 nonce 都不会重复计算（在份额频繁的矿池上，GPU 原先有 13–20 % 的时间空闲）。日志中的算力现在按实际时间计算。RTX 3070（1560 MHz，+175，矿池）：speed 20.3 FW/s @ 179 W，eco 19.9 FW/s @ 156 W。RTX 4070 Ti（2100 MHz，+150，190 W，矿池）：35.1 FW/s @ 179 W（1.2.2：GPU 基准测试 30.6 FW/s @ 190 W）。输出与参考实现逐位一致。新增 RTX 4070 Ti 超频表（第 7 节）。
 * **1.2.2** - GPU 工作进程根据 L2 缓存大小为每块 GPU 自动选择内核分块配置：RTX 30（L2 较小）使用更优的栅格化（`speed`，默认）或 128x256 分块（`eco`）；RTX 40/50 保持 RTX 4070 Ti 的配置。新增 `mode`（`speed`|`eco`；环境变量 `CMFD_MODE`，Extra config 中的 `"mode"`，Windows `start.bat` 中的 `MODE`）。RTX 3070：1.2.1 为 19.8 FW/s @ 172 W；1.2.2 speed 为 19.6 FW/s @ 166 W；eco 为 18.3 FW/s @ 143 W。输出与参考实现逐位一致。Windows `start.bat`：默认矿池改为 Aria。`CMFD_FUSED=<n>` 仍可覆盖该选择。日志行：`fused_config=N mode=... l2_mb=...`。

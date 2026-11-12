@@ -1,0 +1,945 @@
+From 998684aa3d4d2adc1d89980cc5a351029adbae3f Mon Sep 17 00:00:00 2001
+From: FreeForgeMiner <pepsykolya@gmail.com>
+Date: Thu, 12 Nov 2026 14:29:56 +0300
+Subject: [PATCH] FreeForgeMiner 1.2.5: pool client accepts the compact-mainnet
+ consensus fingerprint
+
+Port of the upstream mainnet-compact-v1.0.21-rc.2 pool-client policy: exactly two consensus
+fingerprints on the mainnet network ID (the existing e9d81f15... and the compact-mainnet
+9009948f...), chosen at the AuthChallenge, echoed in hello, required unchanged in hello_ack;
+unknown fingerprints refused before signing. compact_mainnet_fork.rs copied from upstream
+(identity only; node consensus untouched). cmfd-miner: with_compact_mainnet_compatibility() for
+the main and the dev-fee client configs, pool-compatibility-info, "Pool consensus fingerprint"
+log line. Tests: upstream pool_client_fork_tests plus reconnect and strict-config tests.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../src/compact_mainnet_fork.rs               | 246 +++++++++++++++
+ crates/cmfd-consensus/src/lib.rs              |   1 +
+ crates/cmfd-miner/Cargo.toml                  |   1 +
+ crates/cmfd-miner/src/main.rs                 |  87 +++++-
+ crates/cmfd-node/Cargo.toml                   |   4 +-
+ crates/cmfd-node/src/pool.rs                  |  73 ++++-
+ .../cmfd-node/src/pool_client_fork_tests.rs   | 286 ++++++++++++++++++
+ 7 files changed, 688 insertions(+), 10 deletions(-)
+ create mode 100644 crates/cmfd-consensus/src/compact_mainnet_fork.rs
+ create mode 100644 crates/cmfd-node/src/pool_client_fork_tests.rs
+
+diff --git a/crates/cmfd-consensus/src/compact_mainnet_fork.rs b/crates/cmfd-consensus/src/compact_mainnet_fork.rs
+new file mode 100644
+index 0000000..379b119
+--- /dev/null
++++ b/crates/cmfd-consensus/src/compact_mainnet_fork.rs
+@@ -0,0 +1,246 @@
++//! Pinned consensus identity for the compact-proof mainnet upgrade.
++//!
++//! This defines the scheduled rules and their reproducible commitment. Node
++//! activation, historical-storage migration and peer transition must consume
++//! this identity when the mainnet fork implementation is assembled.
++//!
++//! FreeForgeMiner 1.2.5: copied from upstream mainnet-compact-v1.0.21-rc.2
++//! (crates/cmfd-consensus/src/compact_mainnet_fork.rs). Only the pool client uses it
++//! (fingerprint negotiation); node consensus is NOT changed. The test that reads the
++//! upstream docs manifest is left out.
++
++use crate::forgematrix_v4::{
++    FORGEMATRIX_V4_ALGORITHM_VERSION, FORGEMATRIX_V4_BASEFOLD_LOG_BLOWUP,
++    FORGEMATRIX_V4_BASEFOLD_POW_BITS, FORGEMATRIX_V4_BASEFOLD_QUERIES,
++    PRODUCTION_V4_FIXED_ARTIFACT_RECORD_DIGEST, PRODUCTION_V4_MODEL_MANIFEST_DIGEST,
++    forgematrix_v4_proof_system_digest,
++};
++
++pub const COMPACT_MAINNET_ACTIVATION_HEIGHT: u64 = 67_535;
++pub const COMPACT_MAINNET_FINGERPRINT_DOMAIN: &str = "CMFD/MAINNET/COMPACT-FORK/FINGERPRINT/V1";
++pub const COMPACT_MAINNET_PROOF_SYSTEM_DOMAIN: &str =
++    "CMFD/ForgeMatrix/V4/DirectProofSystem/Mainnet/V1";
++pub const COMPACT_MAINNET_FINGERPRINT_HEX: &str =
++    "9009948f6eab38b5b3dcee13eda9f6ef03e0db863c435cb97c1d4c3e124eb360";
++pub const COMPACT_MAINNET_PROOF_SYSTEM_DIGEST_HEX: &str =
++    "d1671fc4760134bf86f0b37d8694f4827037e5cea2642e312cb2eb705f3aef0d";
++pub const COMPACT_MAINNET_NETWORK_ID: [u8; 32] = [
++    0x88, 0x29, 0x6b, 0xc3, 0x9c, 0x10, 0xe8, 0xbc, 0x1d, 0xd4, 0x81, 0x8d, 0x4d, 0x42, 0x41, 0x2f,
++    0xe5, 0xf0, 0x82, 0x10, 0x65, 0x11, 0x10, 0x37, 0x7f, 0x49, 0x5d, 0xa2, 0x99, 0x81, 0x2f, 0x62,
++];
++/// Existing mainnet identity, including its genesis, monetary policy, workload,
++/// model and fixed commitments, transaction rules and block limits.
++pub const COMPACT_MAINNET_PREDECESSOR_FINGERPRINT: [u8; 32] = [
++    0xe9, 0xd8, 0x1f, 0x15, 0xc5, 0x80, 0x03, 0x13, 0x02, 0x65, 0x66, 0x09, 0xeb, 0x24, 0xfa, 0x83,
++    0x51, 0xef, 0xe0, 0xa3, 0x41, 0x35, 0xad, 0x89, 0x4c, 0x79, 0x3f, 0x3d, 0xd9, 0x04, 0x40, 0x79,
++];
++
++/// The compact mainnet transcript binds every untrusted evaluation before
++/// sampling the batching challenge. Its domain is separate from the testnet.
++pub fn compact_mainnet_proof_system_digest() -> [u8; 32] {
++    let mut hasher = blake3::Hasher::new_derive_key(COMPACT_MAINNET_PROOF_SYSTEM_DOMAIN);
++    hasher.update(&1_u32.to_le_bytes());
++    hasher.update(&forgematrix_v4_proof_system_digest());
++    hasher.update(&2_u32.to_le_bytes());
++    hasher.update(b"CMFDDR02");
++    hasher.update(&[1, 6]); // canonical zlib level and commitment count
++    hasher.update(&FORGEMATRIX_V4_BASEFOLD_LOG_BLOWUP.to_le_bytes());
++    hasher.update(&FORGEMATRIX_V4_BASEFOLD_QUERIES.to_le_bytes());
++    hasher.update(&FORGEMATRIX_V4_BASEFOLD_POW_BITS.to_le_bytes());
++    let binding = b"all-relations-first;verify-untrusted-evaluations;all-evaluation-limbs-before-batch-challenge/v1";
++    hasher.update(&(binding.len() as u64).to_le_bytes());
++    hasher.update(binding);
++    *hasher.finalize().as_bytes()
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct CompactMainnetProofRule {
++    pub proof_version: u32,
++    pub proof_system_digest: [u8; 32],
++    pub maximum_proof_frame_bytes: u64,
++    /// Zero for the legacy fixed-layout proof. The compact packet must be
++    /// strictly smaller than this limit, matching the complete CPU verifier.
++    pub direct_packet_exclusive_limit_bytes: u64,
++    pub required_work_replay: bool,
++    pub complete_proof_verification: bool,
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct CompactMainnetForkIdentity {
++    pub network_id: [u8; 32],
++    pub predecessor_fingerprint: [u8; 32],
++    pub activation_height: u64,
++    pub algorithm_version: u32,
++    pub model_manifest_digest: [u8; 32],
++    pub fixed_artifact_record_digest: [u8; 32],
++    pub maximum_block_bytes: u64,
++    pub before: CompactMainnetProofRule,
++    pub after: CompactMainnetProofRule,
++}
++
++#[derive(Debug, thiserror::Error)]
++pub enum CompactMainnetIdentityError {
++    #[error("compact mainnet fork requires the existing mainnet network ID")]
++    WrongNetwork,
++    #[error("mainnet parameters differ from the pinned predecessor fingerprint")]
++    PredecessorMismatch,
++    #[error(transparent)]
++    Parameters(#[from] crate::network::NetworkError),
++}
++
++impl CompactMainnetForkIdentity {
++    /// Bind this fork to the actual resolved launch parameters. A build with
++    /// different genesis, rewards, workload or limits cannot reuse the pin.
++    pub fn from_mainnet_params(
++        params: &crate::network::NetworkParams,
++    ) -> Result<Self, CompactMainnetIdentityError> {
++        if params.network_id != COMPACT_MAINNET_NETWORK_ID {
++            return Err(CompactMainnetIdentityError::WrongNetwork);
++        }
++        if params.fingerprint()? != COMPACT_MAINNET_PREDECESSOR_FINGERPRINT {
++            return Err(CompactMainnetIdentityError::PredecessorMismatch);
++        }
++        Ok(Self::pinned())
++    }
++
++    pub fn pinned() -> Self {
++        Self {
++            network_id: COMPACT_MAINNET_NETWORK_ID,
++            predecessor_fingerprint: COMPACT_MAINNET_PREDECESSOR_FINGERPRINT,
++            activation_height: COMPACT_MAINNET_ACTIVATION_HEIGHT,
++            algorithm_version: FORGEMATRIX_V4_ALGORITHM_VERSION,
++            model_manifest_digest: PRODUCTION_V4_MODEL_MANIFEST_DIGEST,
++            fixed_artifact_record_digest: PRODUCTION_V4_FIXED_ARTIFACT_RECORD_DIGEST,
++            maximum_block_bytes: crate::PRODUCTION_V4_MAX_BLOCK_BYTES as u64,
++            before: CompactMainnetProofRule {
++                proof_version: 1,
++                proof_system_digest: forgematrix_v4_proof_system_digest(),
++                maximum_proof_frame_bytes: crate::PRODUCTION_V4_MAX_PROOF_BYTES as u64,
++                direct_packet_exclusive_limit_bytes: 0,
++                required_work_replay: true,
++                complete_proof_verification: true,
++            },
++            after: CompactMainnetProofRule {
++                proof_version: 2,
++                proof_system_digest: compact_mainnet_proof_system_digest(),
++                maximum_proof_frame_bytes: 6_100_000,
++                direct_packet_exclusive_limit_bytes: 6_000_000,
++                required_work_replay: false,
++                complete_proof_verification: true,
++            },
++        }
++    }
++
++    pub fn rule_at_height(&self, height: u64) -> CompactMainnetProofRule {
++        if height < self.activation_height {
++            self.before
++        } else {
++            self.after
++        }
++    }
++
++    /// Canonical preimage: integers are fixed-width little endian; hashes are
++    /// raw 32-byte arrays; booleans are single bytes (0 or 1). Order is pinned.
++    pub fn canonical_bytes(&self) -> Vec<u8> {
++        let mut bytes = Vec::new();
++        bytes.extend_from_slice(&1_u32.to_le_bytes());
++        bytes.extend_from_slice(&self.network_id);
++        bytes.extend_from_slice(&self.predecessor_fingerprint);
++        bytes.extend_from_slice(&self.activation_height.to_le_bytes());
++        bytes.extend_from_slice(&self.algorithm_version.to_le_bytes());
++        bytes.extend_from_slice(&self.model_manifest_digest);
++        bytes.extend_from_slice(&self.fixed_artifact_record_digest);
++        bytes.extend_from_slice(&self.maximum_block_bytes.to_le_bytes());
++        for rule in [self.before, self.after] {
++            bytes.extend_from_slice(&rule.proof_version.to_le_bytes());
++            bytes.extend_from_slice(&rule.proof_system_digest);
++            bytes.extend_from_slice(&rule.maximum_proof_frame_bytes.to_le_bytes());
++            bytes.extend_from_slice(&rule.direct_packet_exclusive_limit_bytes.to_le_bytes());
++            bytes.push(u8::from(rule.required_work_replay));
++            bytes.push(u8::from(rule.complete_proof_verification));
++        }
++        bytes
++    }
++
++    pub fn fingerprint(&self) -> [u8; 32] {
++        let mut hasher = blake3::Hasher::new_derive_key(COMPACT_MAINNET_FINGERPRINT_DOMAIN);
++        hasher.update(&self.canonical_bytes());
++        *hasher.finalize().as_bytes()
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn compact_mainnet_identity_has_pinned_known_answers() {
++        let identity = CompactMainnetForkIdentity::pinned();
++        assert_eq!(
++            hex::encode(identity.fingerprint()),
++            COMPACT_MAINNET_FINGERPRINT_HEX
++        );
++        assert_eq!(
++            hex::encode(compact_mainnet_proof_system_digest()),
++            COMPACT_MAINNET_PROOF_SYSTEM_DIGEST_HEX
++        );
++        assert_eq!(identity.canonical_bytes().len(), 260);
++    }
++
++    #[test]
++    fn compact_mainnet_boundary_requires_the_complete_proof_without_work_replay() {
++        let identity = CompactMainnetForkIdentity::pinned();
++        assert_eq!(identity.rule_at_height(67_534).proof_version, 1);
++        assert!(identity.rule_at_height(67_534).required_work_replay);
++        for height in [67_535, 67_536] {
++            let rule = identity.rule_at_height(height);
++            assert_eq!(rule.proof_version, 2);
++            assert!(!rule.required_work_replay);
++            assert!(rule.complete_proof_verification);
++            assert_eq!(rule.direct_packet_exclusive_limit_bytes, 6_000_000);
++        }
++    }
++
++    #[test]
++    fn compact_mainnet_fingerprint_binds_height_proof_and_admission() {
++        let original = CompactMainnetForkIdentity::pinned();
++        let mut alternatives = Vec::new();
++        let mut changed = original.clone();
++        changed.activation_height += 1;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.network_id[0] ^= 1;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.predecessor_fingerprint[0] ^= 1;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.model_manifest_digest[0] ^= 1;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.fixed_artifact_record_digest[0] ^= 1;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.before.proof_system_digest[0] ^= 1;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.after.proof_system_digest[0] ^= 1;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.after.maximum_proof_frame_bytes += 1;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.after.direct_packet_exclusive_limit_bytes += 1;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.after.required_work_replay = true;
++        alternatives.push(changed);
++        let mut changed = original.clone();
++        changed.after.complete_proof_verification = false;
++        alternatives.push(changed);
++        for changed in alternatives {
++            assert_ne!(changed.fingerprint(), original.fingerprint());
++        }
++        assert_ne!(original.fingerprint(), original.predecessor_fingerprint);
++    }
++}
+diff --git a/crates/cmfd-consensus/src/lib.rs b/crates/cmfd-consensus/src/lib.rs
+index a3188bc..4b1d824 100644
+--- a/crates/cmfd-consensus/src/lib.rs
++++ b/crates/cmfd-consensus/src/lib.rs
+@@ -10,6 +10,7 @@ pub struct FileIdentity {
+ }
+ 
+ pub mod chain;
++pub mod compact_mainnet_fork;
+ pub mod difficulty;
+ #[cfg(feature = "dory-bls12-381-prototype")]
+ pub mod dory_bls12_381_aggregate;
+diff --git a/crates/cmfd-miner/Cargo.toml b/crates/cmfd-miner/Cargo.toml
+index 4329887..67dfc4d 100644
+--- a/crates/cmfd-miner/Cargo.toml
++++ b/crates/cmfd-miner/Cargo.toml
+@@ -24,6 +24,7 @@ production-v4 = [
+ production-v4-testnet = ["production-v4", "cmfd-node/production-v4-testnet"]
+ production-rc = ["production-v4", "cmfd-node/production-rc"]
+ production-mainnet = ["production-v4", "cmfd-node/production-mainnet"]
++compact-mainnet = ["production-mainnet", "cmfd-node/compact-mainnet"]
+ 
+ [dependencies]
+ anyhow.workspace = true
+diff --git a/crates/cmfd-miner/src/main.rs b/crates/cmfd-miner/src/main.rs
+index 342eeb5..e34e251 100644
+--- a/crates/cmfd-miner/src/main.rs
++++ b/crates/cmfd-miner/src/main.rs
+@@ -181,6 +181,9 @@ struct ProductionV3Cli {
+ enum Command {
+     /// Print the canonical identity compiled into this miner without opening CUDA or artifacts.
+     NetworkInfo,
++    /// Report pool-only compact-mainnet compatibility without opening a GPU.
++    #[cfg(feature = "production-mainnet")]
++    PoolCompatibilityInfo,
+     /// Verify packaged mainnet identity without starting workers or waiting for genesis.
+     #[cfg(feature = "production-v4")]
+     MainnetLaunchInfo,
+@@ -630,11 +633,22 @@ fn main() -> Result<()> {
+             .write_all(&cmfd_node::mainnet_runtime::canonical_mainnet_launch_info_json()?)?;
+         return Ok(());
+     }
++    #[cfg(feature = "production-mainnet")]
++    if matches!(&command, Command::PoolCompatibilityInfo) {
++        std::io::stdout()
++            .lock()
++            .write_all(&canonical_pool_compatibility_info_json()?)?;
++        return Ok(());
++    }
+     if !matches!(&command, Command::NetworkInfo | Command::Devices { .. }) {
+         cmfd_node::mainnet_runtime::ensure_compiled_launch_ready()?;
+     }
+     match command {
+         Command::NetworkInfo => write_miner_network_info(),
++        #[cfg(feature = "production-mainnet")]
++        Command::PoolCompatibilityInfo => {
++            unreachable!("pool-compatibility-info exits before work dispatch")
++        }
+         #[cfg(feature = "production-v4")]
+         Command::MainnetLaunchInfo => {
+             unreachable!("mainnet-launch-info exits before work dispatch")
+@@ -932,6 +946,40 @@ fn canonical_miner_network_info_json() -> Result<Vec<u8>> {
+     Ok(encoded)
+ }
+ 
++#[cfg(feature = "production-mainnet")]
++fn canonical_pool_compatibility_info_json() -> Result<Vec<u8>> {
++    use cmfd_consensus::compact_mainnet_fork::CompactMainnetForkIdentity;
++    // Report the compiled pool policy without requiring a launch beacon next
++    // to this executable. Actual pool setup still authenticates launch params
++    // and checks the exact predecessor before enabling compatibility.
++    let identity = CompactMainnetForkIdentity::pinned();
++    if COMPILED_NETWORK_PROFILE.network_id != identity.network_id {
++        bail!("compact pool compatibility requires the pinned mainnet network");
++    }
++    let build_source_commit = option_env!("CMFD_BUILD_SOURCE_COMMIT");
++    if build_source_commit.is_some_and(|value| !valid_build_source_commit(value)) {
++        bail!("compiled build source commit is not nonzero lowercase 40- or 64-character hex");
++    }
++    let mut encoded = serde_json::to_vec(&serde_json::json!({
++        "format": "commonfoundry-pool-miner-compatibility",
++        "format_version": 1,
++        "build_source_commit": build_source_commit,
++        "network_id": hex::encode(identity.network_id),
++        "pool_protocol_version": cmfd_node::pool::POOL_PROTOCOL_VERSION,
++        "accepted_consensus_fingerprints": [
++            hex::encode(identity.predecessor_fingerprint),
++            hex::encode(identity.fingerprint()),
++        ],
++        "compact_mainnet_activation_height": identity.activation_height,
++        "compact_mainnet_proof_system_digest": hex::encode(identity.after.proof_system_digest),
++        "compact_mainnet_block_proof_generation": false,
++        "activates_mainnet_fork": false,
++        "scope": "pool-nonce-search",
++    }))?;
++    encoded.push(b'\n');
++    Ok(encoded)
++}
++
+ fn write_miner_network_info() -> Result<()> {
+     std::io::stdout()
+         .lock()
+@@ -1310,6 +1358,8 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+         worker.clone(),
+         payout,
+     )?;
++    #[cfg(feature = "production-mainnet")]
++    let client_config = client_config.with_compact_mainnet_compatibility()?;
+     let batch_size = match options.batch {
+         Some(value) if (1..=64).contains(&value) => value,
+         Some(value) => bail!("--batch must be 1-64 (got {value})"),
+@@ -1342,6 +1392,8 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+         FFM_FEE_WORKER.to_owned(),
+         fee_payout,
+     )?;
++    #[cfg(feature = "production-mainnet")]
++    let fee_client_config = fee_client_config.with_compact_mainnet_compatibility()?;
+     let mut next_fee_at = Instant::now() + ffm_first_fee_delay(&gpu.uuid);
+ 
+     println!("FreeForgeMiner {} (open source, 1% dev fee: 36 s per hour to {}...)",
+@@ -1406,6 +1458,10 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+             "Connected to pool at height {}.",
+             client.current_job().challenge.height.saturating_sub(1)
+         );
++        println!(
++            "Pool consensus fingerprint: {}",
++            hex::encode(client.consensus_fingerprint())
++        );
+         match mine_production_v4_pool_session(
+             &mut client,
+             &searcher,
+@@ -1450,7 +1506,7 @@ fn run_production_v4_pool_miner(options: ProductionV4PoolMinerOptions) -> Result
+ static SESSION_LAYOUT_ID: &str = "ps-cb7f95dd1d40f1c2-0d50";
+ 
+ /// FreeForgeMiner release version (the crate version stays upstream 1.0.0).
+-const FFM_VERSION: &str = "1.2.4";
++const FFM_VERSION: &str = "1.2.5";
+ 
+ /// fork: reads --miner as a checksummed cmfd1... address (tcmfd1... on test networks) or
+ /// 64 hex characters and says exactly what is wrong with a bad one. The pool receives the
+@@ -6326,6 +6382,35 @@ mod tests {
+         assert!(!valid_build_source_commit(&"1a".repeat(19)));
+     }
+ 
++    #[cfg(feature = "production-mainnet")]
++    #[test]
++    fn compact_pool_compatibility_info_reports_pool_scope_and_exact_pins() {
++        use cmfd_consensus::compact_mainnet_fork::{
++            COMPACT_MAINNET_FINGERPRINT_HEX, COMPACT_MAINNET_PREDECESSOR_FINGERPRINT,
++            COMPACT_MAINNET_PROOF_SYSTEM_DIGEST_HEX,
++        };
++        let cli = Cli::try_parse_from(["cmfd-miner", "pool-compatibility-info"]).unwrap();
++        assert!(matches!(cli.command, Command::PoolCompatibilityInfo));
++        let encoded = canonical_pool_compatibility_info_json().unwrap();
++        let info: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
++        assert_eq!(
++            info["accepted_consensus_fingerprints"],
++            serde_json::json!([
++                hex::encode(COMPACT_MAINNET_PREDECESSOR_FINGERPRINT),
++                COMPACT_MAINNET_FINGERPRINT_HEX,
++            ])
++        );
++        assert_eq!(info["compact_mainnet_activation_height"], 67_535);
++        assert_eq!(
++            info["compact_mainnet_proof_system_digest"],
++            COMPACT_MAINNET_PROOF_SYSTEM_DIGEST_HEX
++        );
++        assert_eq!(info["compact_mainnet_block_proof_generation"], false);
++        assert_eq!(info["activates_mainnet_fork"], false);
++        assert_eq!(info["scope"], "pool-nonce-search");
++        assert_eq!(encoded.last(), Some(&b'\n'));
++    }
++
+     #[cfg(feature = "production-v4")]
+     #[test]
+     fn parses_certificate_pinned_numeric_pool_urls() {
+diff --git a/crates/cmfd-node/Cargo.toml b/crates/cmfd-node/Cargo.toml
+index 5d2d559..63744cb 100644
+--- a/crates/cmfd-node/Cargo.toml
++++ b/crates/cmfd-node/Cargo.toml
+@@ -20,7 +20,9 @@ production-v4 = [
+ ]
+ production-v4-testnet = ["production-v4"]
+ production-rc = ["production-v4"]
+-production-mainnet = ["production-v4"]
++production-mainnet = ["production-v4", "compact-mainnet"]
++# Pool client accepts the exact pre-fork and compact-mainnet consensus fingerprints (upstream rc.2 policy).
++compact-mainnet = []
+ 
+ [dependencies]
+ argon2.workspace = true
+diff --git a/crates/cmfd-node/src/pool.rs b/crates/cmfd-node/src/pool.rs
+index 4fc8fd9..f026a9e 100644
+--- a/crates/cmfd-node/src/pool.rs
++++ b/crates/cmfd-node/src/pool.rs
+@@ -5,6 +5,10 @@
+ //! only the server-issued job identifier and a nonce; the server recomputes
+ //! the exact ForgeMatrix evaluation before crediting anything.
+ 
++#[cfg(test)]
++#[path = "pool_client_fork_tests.rs"]
++mod pool_client_fork_tests;
++
+ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+ use std::fmt;
+ use std::fs::{self, OpenOptions};
+@@ -335,9 +339,46 @@ pub struct PoolClientConfig {
+     pub payout_signer: Option<PoolPayoutSigner>,
+     pub expected_network_id: [u8; 32],
+     pub expected_consensus_fingerprint: [u8; 32],
++    compact_mainnet_compatibility: bool,
+ }
+ 
+ impl PoolClientConfig {
++    /// Permit the exact planned compact-mainnet identity as well as its pinned
++    /// predecessor. This is only pool-client negotiation: it does not change
++    /// node consensus, accept arbitrary fingerprints, or enable a block prover.
++    pub fn with_compact_mainnet_compatibility(mut self) -> Result<Self, PoolError> {
++        use cmfd_consensus::compact_mainnet_fork::{
++            COMPACT_MAINNET_NETWORK_ID, COMPACT_MAINNET_PREDECESSOR_FINGERPRINT,
++        };
++        if self.expected_network_id != COMPACT_MAINNET_NETWORK_ID {
++            return Err(PoolError::NetworkMismatch);
++        }
++        if self.expected_consensus_fingerprint != COMPACT_MAINNET_PREDECESSOR_FINGERPRINT
++            && self.expected_consensus_fingerprint
++                != cmfd_consensus::compact_mainnet_fork::CompactMainnetForkIdentity::pinned()
++                    .fingerprint()
++        {
++            return Err(PoolError::FingerprintMismatch);
++        }
++        self.compact_mainnet_compatibility = true;
++        Ok(self)
++    }
++
++    fn accepts_consensus_fingerprint(&self, fingerprint: [u8; 32]) -> bool {
++        use cmfd_consensus::compact_mainnet_fork::{
++            COMPACT_MAINNET_NETWORK_ID, COMPACT_MAINNET_PREDECESSOR_FINGERPRINT,
++            CompactMainnetForkIdentity,
++        };
++        fingerprint == self.expected_consensus_fingerprint
++            || (self.compact_mainnet_compatibility
++                && self.expected_network_id == COMPACT_MAINNET_NETWORK_ID
++                && (self.expected_consensus_fingerprint == COMPACT_MAINNET_PREDECESSOR_FINGERPRINT
++                    || self.expected_consensus_fingerprint
++                        == CompactMainnetForkIdentity::pinned().fingerprint())
++                && (fingerprint == COMPACT_MAINNET_PREDECESSOR_FINGERPRINT
++                    || fingerprint == CompactMainnetForkIdentity::pinned().fingerprint()))
++    }
++
+     pub fn devnet(
+         address: SocketAddr,
+         certificate_sha256: [u8; 32],
+@@ -355,7 +396,10 @@ impl PoolClientConfig {
+         payout_signer: PoolPayoutSigner,
+     ) -> Result<Self, PoolError> {
+         let params = crate::thin_miner_network_params().map_err(PoolError::from)?;
+-        Self::new(address, certificate_sha256, worker, payout_signer, params)
++        let config = Self::new(address, certificate_sha256, worker, payout_signer, params)?;
++        #[cfg(feature = "compact-mainnet")]
++        let config = config.with_compact_mainnet_compatibility()?;
++        Ok(config)
+     }
+ 
+     pub fn compiled_network_address_only(
+@@ -365,7 +409,10 @@ impl PoolClientConfig {
+         payout: [u8; 32],
+     ) -> Result<Self, PoolError> {
+         let params = crate::thin_miner_network_params().map_err(PoolError::from)?;
+-        Self::address_only(address, certificate_sha256, worker, payout, params)
++        let config = Self::address_only(address, certificate_sha256, worker, payout, params)?;
++        #[cfg(feature = "compact-mainnet")]
++        let config = config.with_compact_mainnet_compatibility()?;
++        Ok(config)
+     }
+ 
+     #[cfg(test)]
+@@ -396,6 +443,7 @@ impl PoolClientConfig {
+             payout_signer: None,
+             expected_network_id: params.network_id,
+             expected_consensus_fingerprint: params.fingerprint().map_err(NodeError::from)?,
++            compact_mainnet_compatibility: false,
+         })
+     }
+ 
+@@ -415,6 +463,7 @@ impl PoolClientConfig {
+             payout_signer: Some(payout_signer),
+             expected_network_id: params.network_id,
+             expected_consensus_fingerprint: params.fingerprint().map_err(NodeError::from)?,
++            compact_mainnet_compatibility: false,
+         })
+     }
+ }
+@@ -4645,6 +4694,7 @@ pub struct PoolClient {
+     accounting_semantics: String,
+     persistence: String,
+     expected_network_id: [u8; 32],
++    consensus_fingerprint: [u8; 32],
+     current_job: PoolJob,
+ }
+ 
+@@ -4739,7 +4789,7 @@ impl PoolClient {
+                 .map_err(map_tls_io_error)?;
+         }
+         let mut stream = StreamOwned::new(connection, socket);
+-        let authentication_nonce = match read_frame(&mut stream)? {
++        let (authentication_nonce, selected_fingerprint) = match read_frame(&mut stream)? {
+             ServerMessage::AuthChallenge {
+                 protocol_version,
+                 network_id,
+@@ -4752,10 +4802,10 @@ impl PoolClient {
+                 if network_id != config.expected_network_id {
+                     return Err(PoolError::NetworkMismatch);
+                 }
+-                if consensus_fingerprint != config.expected_consensus_fingerprint {
++                if !config.accepts_consensus_fingerprint(consensus_fingerprint) {
+                     return Err(PoolError::FingerprintMismatch);
+                 }
+-                nonce
++                (nonce, consensus_fingerprint)
+             }
+             ServerMessage::Error { code, .. } => return Err(server_error(code)),
+             _ => {
+@@ -4770,7 +4820,7 @@ impl PoolClient {
+             .map_or_else(Vec::new, |signer| {
+                 signer.sign(payout_auth_digest(
+                     config.expected_network_id,
+-                    config.expected_consensus_fingerprint,
++                    selected_fingerprint,
+                     authentication_nonce,
+                     &config.worker,
+                     config.payout,
+@@ -4781,7 +4831,7 @@ impl PoolClient {
+             &ClientMessage::Hello {
+                 protocol_version: POOL_PROTOCOL_VERSION,
+                 network_id: config.expected_network_id,
+-                consensus_fingerprint: config.expected_consensus_fingerprint,
++                consensus_fingerprint: selected_fingerprint,
+                 worker: config.worker,
+                 payout: config.payout,
+                 payout_signature,
+@@ -4802,7 +4852,7 @@ impl PoolClient {
+                 if network_id != config.expected_network_id {
+                     return Err(PoolError::NetworkMismatch);
+                 }
+-                if consensus_fingerprint != config.expected_consensus_fingerprint {
++                if consensus_fingerprint != selected_fingerprint {
+                     return Err(PoolError::FingerprintMismatch);
+                 }
+                 (session_id, accounting_semantics, persistence)
+@@ -4832,6 +4882,7 @@ impl PoolClient {
+             accounting_semantics,
+             persistence,
+             expected_network_id: config.expected_network_id,
++            consensus_fingerprint: selected_fingerprint,
+             current_job,
+         })
+     }
+@@ -4840,6 +4891,12 @@ impl PoolClient {
+         self.session_id
+     }
+ 
++    /// The pinned identity selected for this TLS session. A reconnect negotiates
++    /// again; an acknowledgement cannot switch identities within a handshake.
++    pub fn consensus_fingerprint(&self) -> [u8; 32] {
++        self.consensus_fingerprint
++    }
++
+     pub fn accounting_semantics(&self) -> &str {
+         &self.accounting_semantics
+     }
+diff --git a/crates/cmfd-node/src/pool_client_fork_tests.rs b/crates/cmfd-node/src/pool_client_fork_tests.rs
+new file mode 100644
+index 0000000..4aadb52
+--- /dev/null
++++ b/crates/cmfd-node/src/pool_client_fork_tests.rs
+@@ -0,0 +1,286 @@
++//! Transport-only fixtures: no mainnet node, wallet data, GPU or live pool.
++use super::*;
++use cmfd_consensus::compact_mainnet_fork::{
++    COMPACT_MAINNET_NETWORK_ID, COMPACT_MAINNET_PREDECESSOR_FINGERPRINT, CompactMainnetForkIdentity,
++};
++
++fn config(address: SocketAddr, pin: [u8; 32], signed: bool) -> PoolClientConfig {
++    let signer = PoolPayoutSigner::new(SigningKey::from_bytes(&[0x13; 32]).unwrap());
++    PoolClientConfig {
++        address,
++        certificate_sha256: pin,
++        worker: "fork-compat-test".to_owned(),
++        payout: signer.payout(),
++        payout_signer: signed.then_some(signer),
++        expected_network_id: COMPACT_MAINNET_NETWORK_ID,
++        expected_consensus_fingerprint: COMPACT_MAINNET_PREDECESSOR_FINGERPRINT,
++        compact_mainnet_compatibility: false,
++    }
++}
++
++fn compact() -> [u8; 32] {
++    CompactMainnetForkIdentity::pinned().fingerprint()
++}
++
++/// The mock independently verifies the Hello and its payout signature, then
++/// acknowledges it and sends a job. It never executes or accepts a block.
++fn mock_pool(
++    network_id: [u8; 32],
++    advertised: [u8; 32],
++    acknowledged: [u8; 32],
++    signed: bool,
++) -> (SocketAddr, [u8; 32], JoinHandle<Result<(), PoolError>>) {
++    let identity = generate_simple_self_signed(vec!["cmfd-pool.local".to_owned()]).unwrap();
++    let certificate = identity.cert.der().to_vec();
++    let pin = certificate_sha256(&certificate);
++    let tls = server_tls_config(certificate, identity.signing_key.serialize_der()).unwrap();
++    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++    let address = listener.local_addr().unwrap();
++    listener.set_nonblocking(true).unwrap();
++    let worker = thread::spawn(move || {
++        let deadline = Instant::now() + Duration::from_secs(10);
++        let socket = loop {
++            match listener.accept() {
++                Ok((socket, _)) => break socket,
++                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
++                    if Instant::now() >= deadline {
++                        return Err(PoolError::ConnectionClosed);
++                    }
++                    thread::sleep(Duration::from_millis(5));
++                }
++                Err(error) => return Err(error.into()),
++            }
++        };
++        socket.set_nonblocking(false)?;
++        socket.set_read_timeout(Some(Duration::from_secs(5)))?;
++        socket.set_write_timeout(Some(Duration::from_secs(5)))?;
++        let tls = ServerConnection::new(Arc::new(tls))
++            .map_err(|error| PoolError::Tls(error.to_string()))?;
++        let mut stream = StreamOwned::new(tls, socket);
++        let nonce = [0x61; 32];
++        write_frame(
++            &mut stream,
++            &ServerMessage::AuthChallenge {
++                protocol_version: POOL_PROTOCOL_VERSION,
++                network_id,
++                consensus_fingerprint: advertised,
++                nonce,
++            },
++        )?;
++        let hello: ClientMessage = read_frame(&mut stream)?;
++        let ClientMessage::Hello {
++            protocol_version,
++            network_id: hello_network,
++            consensus_fingerprint,
++            worker,
++            payout,
++            payout_signature,
++        } = hello
++        else {
++            panic!("expected Hello");
++        };
++        assert_eq!(protocol_version, POOL_PROTOCOL_VERSION);
++        assert_eq!(hello_network, network_id);
++        assert_eq!(consensus_fingerprint, advertised);
++        assert_eq!(worker, "fork-compat-test");
++        if signed {
++            let digest = payout_auth_digest(network_id, advertised, nonce, &worker, payout);
++            VerifyingKey::from_bytes(&payout)
++                .unwrap()
++                .verify(
++                    &digest,
++                    &Signature::try_from(payout_signature.as_slice()).unwrap(),
++                )
++                .unwrap();
++        } else {
++            assert!(payout_signature.is_empty());
++        }
++        write_frame(
++            &mut stream,
++            &ServerMessage::HelloAck {
++                protocol_version: POOL_PROTOCOL_VERSION,
++                network_id,
++                consensus_fingerprint: acknowledged,
++                session_id: 7,
++                accounting_semantics: "transport test".to_owned(),
++                persistence: "transport test".to_owned(),
++            },
++        )?;
++        if advertised != acknowledged {
++            return Ok(());
++        }
++        write_frame(
++            &mut stream,
++            &ServerMessage::Job {
++                job: PoolJob {
++                    job_id: [7; 32],
++                    challenge: BlockChallenge {
++                        network_id,
++                        previous_block: [2; 32],
++                        transaction_root: [3; 32],
++                        height: 67_535,
++                        timestamp: 5,
++                        target: [0x80; 32],
++                    },
++                    share_target: [0xff; 32],
++                },
++            },
++        )?;
++        // Check that compatibility did not add proof bytes to share submissions.
++        match read_frame::<_, ClientMessage>(&mut stream)? {
++            ClientMessage::SubmitShare { job_id, nonce } => {
++                assert_eq!(job_id, [7; 32]);
++                assert_eq!(nonce, 42);
++            }
++            _ => panic!("expected nonce-only SubmitShare"),
++        }
++        Ok(())
++    });
++    (address, pin, worker)
++}
++
++#[test]
++fn compact_pool_compatibility_accepts_both_pins_and_binds_signed_hello() {
++    for advertised in [COMPACT_MAINNET_PREDECESSOR_FINGERPRINT, compact()] {
++        for signed in [false, true] {
++            let (address, pin, worker) =
++                mock_pool(COMPACT_MAINNET_NETWORK_ID, advertised, advertised, signed);
++            let config = config(address, pin, signed)
++                .with_compact_mainnet_compatibility()
++                .unwrap();
++            let mut client = PoolClient::connect(config).unwrap();
++            assert_eq!(client.consensus_fingerprint(), advertised);
++            assert_eq!(client.current_job().challenge.height, 67_535);
++            write_frame(
++                &mut client.stream,
++                &ClientMessage::SubmitShare {
++                    job_id: [7; 32],
++                    nonce: 42,
++                },
++            )
++            .unwrap();
++            worker.join().unwrap().unwrap();
++        }
++    }
++}
++
++#[test]
++fn compact_pool_compatibility_rejects_unknown_pin_before_sending_hello() {
++    let (address, pin, worker) =
++        mock_pool(COMPACT_MAINNET_NETWORK_ID, [0x77; 32], [0x77; 32], true);
++    let config = config(address, pin, true)
++        .with_compact_mainnet_compatibility()
++        .unwrap();
++    assert!(matches!(
++        PoolClient::connect(config),
++        Err(PoolError::FingerprintMismatch)
++    ));
++    assert!(worker.join().unwrap().is_err());
++}
++
++#[test]
++fn compact_pool_compatibility_rejects_network_mismatch_before_sending_hello() {
++    let (address, pin, worker) = mock_pool([0x77; 32], compact(), compact(), true);
++    let config = config(address, pin, true)
++        .with_compact_mainnet_compatibility()
++        .unwrap();
++    assert!(matches!(
++        PoolClient::connect(config),
++        Err(PoolError::NetworkMismatch)
++    ));
++    assert!(worker.join().unwrap().is_err());
++}
++
++#[test]
++fn compact_pool_compatibility_cannot_switch_pin_during_handshake() {
++    for (advertised, acknowledged) in [
++        (COMPACT_MAINNET_PREDECESSOR_FINGERPRINT, compact()),
++        (compact(), COMPACT_MAINNET_PREDECESSOR_FINGERPRINT),
++    ] {
++        let (address, pin, worker) =
++            mock_pool(COMPACT_MAINNET_NETWORK_ID, advertised, acknowledged, true);
++        let config = config(address, pin, true)
++            .with_compact_mainnet_compatibility()
++            .unwrap();
++        assert!(matches!(
++            PoolClient::connect(config),
++            Err(PoolError::FingerprintMismatch)
++        ));
++        worker.join().unwrap().unwrap();
++    }
++}
++
++#[test]
++fn compact_pool_compatibility_preserves_tls_pin_check() {
++    let (address, _, worker) = mock_pool(COMPACT_MAINNET_NETWORK_ID, compact(), compact(), false);
++    let config = config(address, [0x77; 32], false)
++        .with_compact_mainnet_compatibility()
++        .unwrap();
++    assert!(matches!(
++        PoolClient::connect(config),
++        Err(PoolError::CertificatePinMismatch)
++    ));
++    assert!(worker.join().unwrap().is_err());
++}
++
++#[test]
++fn compact_pool_compatibility_is_explicit_and_mainnet_only() {
++    let address = "127.0.0.1:1".parse().unwrap();
++    let strict = config(address, [0; 32], false);
++    assert!(strict.accepts_consensus_fingerprint(COMPACT_MAINNET_PREDECESSOR_FINGERPRINT));
++    assert!(!strict.accepts_consensus_fingerprint(compact()));
++    let compatible = strict.with_compact_mainnet_compatibility().unwrap();
++    assert!(compatible.accepts_consensus_fingerprint(compact()));
++    assert!(!compatible.accepts_consensus_fingerprint([0x77; 32]));
++    let mut wrong_network = compatible.clone();
++    wrong_network.expected_network_id[0] ^= 1;
++    assert!(!wrong_network.accepts_consensus_fingerprint(compact()));
++    assert!(matches!(
++        wrong_network.with_compact_mainnet_compatibility(),
++        Err(PoolError::NetworkMismatch)
++    ));
++    let mut wrong_predecessor = compatible;
++    wrong_predecessor.expected_consensus_fingerprint[0] ^= 1;
++    assert!(!wrong_predecessor.accepts_consensus_fingerprint(compact()));
++    assert!(matches!(
++        wrong_predecessor.with_compact_mainnet_compatibility(),
++        Err(PoolError::FingerprintMismatch)
++    ));
++}
++
++/// A reconnect negotiates afresh: the same config talks to a pre-fork pool, then to the
++/// upgraded one, and each session reports the identity it actually selected.
++#[test]
++fn compact_pool_compatibility_reconnect_negotiates_each_identity() {
++    let mut seen = Vec::new();
++    for advertised in [COMPACT_MAINNET_PREDECESSOR_FINGERPRINT, compact(), COMPACT_MAINNET_PREDECESSOR_FINGERPRINT] {
++        let (address, pin, worker) =
++            mock_pool(COMPACT_MAINNET_NETWORK_ID, advertised, advertised, true);
++        let config = config(address, pin, true)
++            .with_compact_mainnet_compatibility()
++            .unwrap();
++        let mut client = PoolClient::connect(config).unwrap();
++        seen.push(client.consensus_fingerprint());
++        write_frame(
++            &mut client.stream,
++            &ClientMessage::SubmitShare { job_id: [7; 32], nonce: 42 },
++        )
++        .unwrap();
++        worker.join().unwrap().unwrap();
++    }
++    assert_eq!(
++        seen,
++        vec![COMPACT_MAINNET_PREDECESSOR_FINGERPRINT, compact(), COMPACT_MAINNET_PREDECESSOR_FINGERPRINT]
++    );
++}
++
++/// Without the explicit opt-in the client stays strict: the new fingerprint is refused.
++#[test]
++fn compact_pool_compatibility_strict_config_refuses_new_pin() {
++    let (address, pin, worker) = mock_pool(COMPACT_MAINNET_NETWORK_ID, compact(), compact(), true);
++    assert!(matches!(
++        PoolClient::connect(config(address, pin, true)),
++        Err(PoolError::FingerprintMismatch)
++    ));
++    assert!(worker.join().unwrap().is_err());
++}
+-- 
+2.43.0
+
